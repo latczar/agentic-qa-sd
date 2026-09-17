@@ -1,10 +1,16 @@
 import enum
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+# nomic-embed-text returns 768 numbers per piece of text. The column width is
+# fixed at table-creation time, so changing embedding model later means a
+# migration and a re-embed of every article - not a config tweak.
+EMBEDDING_DIMENSIONS = 768
 
 
 class Base(DeclarativeBase):
@@ -120,3 +126,32 @@ class ProcessedEvent(Base):
     event_id: Mapped[str] = mapped_column(String(36), unique=True)
     ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class KnowledgeArticle(Base):
+    """A knowledge base article plus the vector that makes it searchable by meaning.
+
+    One article = one embedding. No chunking yet: these articles are short enough
+    to embed whole, and chunking only earns its place once retrieval quality shows
+    it's needed (Phase 5).
+    """
+
+    __tablename__ = "knowledge_articles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Stable identifier taken from the source filename, so re-ingesting the same
+    # file updates its row instead of inserting a duplicate.
+    slug: Mapped[str] = mapped_column(String(160), unique=True)
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    # SHA-256 of title + body. If it hasn't changed since last time, ingestion
+    # skips the embedding call entirely - that's the expensive part.
+    content_hash: Mapped[str] = mapped_column(String(64))
+    # Nullable on purpose: a row can exist with its text stored but no embedding
+    # yet, which is exactly the state we're in if Ollama was unreachable partway
+    # through ingestion. Phase 5 retrieval ignores rows where this is NULL.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
