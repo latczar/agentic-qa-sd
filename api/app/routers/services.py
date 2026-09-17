@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.models import Service
 from app.schemas import ServiceOut
+from shared.db import get_db
+from shared.models import Service
 
 router = APIRouter(prefix="/services", tags=["services"])
 

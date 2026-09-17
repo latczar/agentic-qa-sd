@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 
-from app.db import ping_database
 from app.routers import services, tickets, users
+from shared.db import ping_database
 
 app = FastAPI(title="AI Service Desk Agent")
 

@@ -1,4 +1,4 @@
-from app.models import Service, ServiceStatus
+from shared.models import Service, ServiceStatus
 
 
 def test_list_services(client, db_session):

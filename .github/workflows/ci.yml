@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  api-tests:
+  tests:
     runs-on: ubuntu-latest
 
     services:
@@ -24,6 +24,24 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      rabbitmq:
+        image: rabbitmq:3-management
+        env:
+          RABBITMQ_DEFAULT_USER: sd_user
+          RABBITMQ_DEFAULT_PASS: sd_password
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://sd_user:sd_password@localhost:5432/service_desk
+      TEST_DATABASE_URL: postgresql+psycopg://sd_user:sd_password@localhost:5432/service_desk_test
+      RABBITMQ_URL: amqp://sd_user:sd_password@localhost:5672/
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,13 +49,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install API dependencies
         working-directory: api
         run: pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run API tests
         working-directory: api
-        env:
-          DATABASE_URL: postgresql+psycopg://sd_user:sd_password@localhost:5432/service_desk
-          TEST_DATABASE_URL: postgresql+psycopg://sd_user:sd_password@localhost:5432/service_desk_test
+        run: pytest -v
+
+      - name: Install worker dependencies
+        working-directory: worker
+        run: pip install -r requirements.txt
+
+      - name: Run worker tests
+        working-directory: worker
         run: pytest -v

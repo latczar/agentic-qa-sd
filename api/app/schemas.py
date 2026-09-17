@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import Priority, ServiceStatus, TicketStatus, UserRole
+from shared.models import Priority, ServiceStatus, TicketStatus, UserRole
 
 
 class UserOut(BaseModel):
