@@ -1,4 +1,4 @@
-from app.models import User, UserRole
+from shared.models import User, UserRole
 
 
 def test_get_user(client, db_session):

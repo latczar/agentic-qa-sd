@@ -1,5 +1,5 @@
-from app.db import engine
-from app.models import Base
+from shared.db import engine
+from shared.models import Base
 
 
 def main() -> None:

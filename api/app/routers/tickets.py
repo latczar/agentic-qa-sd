@@ -1,9 +1,14 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.models import AuditLog, Ticket, TicketComment
 from app.schemas import CommentCreate, CommentOut, TicketCreate, TicketOut, TicketUpdate
+from shared.db import get_db
+from shared.models import AuditLog, Ticket, TicketComment, TicketStatus
+from shared.rabbitmq import publish_ticket_created
+
+logger = logging.getLogger("api.tickets")
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -25,6 +30,21 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)) -> Ticke
     db.add(ticket)
     db.flush()  # assigns ticket.id so the audit log row below can reference it
     db.add(AuditLog(ticket_id=ticket.id, event_type="ticket_created", detail={"subject": ticket.subject}))
+    db.commit()
+    db.refresh(ticket)
+
+    # Publish only after the ticket is safely committed. If this fails, the
+    # ticket still exists as NEW rather than being announced before it's real.
+    # It just won't move forward on its own — there's no automatic recovery
+    # for this yet, which is a known limitation (see README).
+    try:
+        event_id = publish_ticket_created(ticket.id)
+        ticket.status = TicketStatus.QUEUED
+        db.add(AuditLog(ticket_id=ticket.id, event_type="ticket_queued", detail={"event_id": event_id}))
+    except Exception as exc:
+        logger.error("failed to publish ticket_created for ticket %s: %s", ticket.id, exc)
+        db.add(AuditLog(ticket_id=ticket.id, event_type="ticket_queue_failed", detail={"error": str(exc)}))
+
     db.commit()
     db.refresh(ticket)
     return ticket

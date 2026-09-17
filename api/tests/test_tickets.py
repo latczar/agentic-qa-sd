@@ -1,4 +1,4 @@
-from app.models import User, UserRole
+from shared.models import User, UserRole
 
 
 def _make_user(db_session, email: str = "test.user@example.com") -> User:
@@ -23,7 +23,9 @@ def test_create_ticket(client, db_session):
 
     assert response.status_code == 201
     body = response.json()
-    assert body["status"] == "NEW"
+    # QUEUED, not NEW: creating a ticket also publishes it to RabbitMQ (Phase 3),
+    # and this test runs against a real broker, so the publish really succeeds.
+    assert body["status"] == "QUEUED"
     assert body["submitted_by_id"] == user.id
     assert body["priority"] is None
 

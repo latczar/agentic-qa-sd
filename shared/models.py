@@ -104,3 +104,19 @@ class AuditLog(Base):
     event_type: Mapped[str] = mapped_column(String(100))
     detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProcessedEvent(Base):
+    """Idempotency record: one row per successfully processed queue event.
+
+    If RabbitMQ redelivers a message (e.g. the worker crashed after committing
+    but before acking), the worker checks this table by event_id and skips
+    reprocessing rather than doing the work twice.
+    """
+
+    __tablename__ = "processed_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(36), unique=True)
+    ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -1,7 +1,7 @@
 """Synthetic demo data — no real people, no real company services."""
 
-from app.db import SessionLocal
-from app.models import Service, ServiceStatus, User, UserRole
+from shared.db import SessionLocal
+from shared.models import Service, ServiceStatus, User, UserRole
 
 SEED_USERS = [
     {"name": "Jamie Whitfield", "email": "jamie.whitfield@example.com", "role": UserRole.END_USER},
