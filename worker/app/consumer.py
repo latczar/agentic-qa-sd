@@ -59,7 +59,16 @@ def _dead_letter(channel: BlockingChannel, payload: dict, reason: str) -> None:
         ticket = db.get(Ticket, ticket_id) if ticket_id else None
         if ticket is not None:
             ticket.status = TicketStatus.FAILED
-        db.add(AuditLog(ticket_id=ticket_id, event_type="ticket_dead_lettered", detail={"reason": reason}))
+        db.add(
+            AuditLog(
+                # ticket_id has a real FK to tickets.id — a "ticket not found"
+                # dead-letter has no valid ticket to point at, so it goes in
+                # detail instead rather than violating referential integrity.
+                ticket_id=ticket.id if ticket is not None else None,
+                event_type="ticket_dead_lettered",
+                detail={"reason": reason, "ticket_id": ticket_id},
+            )
+        )
         db.commit()
     finally:
         db.close()
