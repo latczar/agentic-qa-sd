@@ -24,15 +24,29 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
 
-    user_role = postgresql.ENUM("END_USER", "AGENT", "ADMIN", name="user_role")
-    service_status = postgresql.ENUM("OPERATIONAL", "DEGRADED", "OUTAGE", name="service_status")
-    ticket_status = postgresql.ENUM(
+    # Create each enum type explicitly first...
+    postgresql.ENUM("END_USER", "AGENT", "ADMIN", name="user_role").create(bind, checkfirst=True)
+    postgresql.ENUM("OPERATIONAL", "DEGRADED", "OUTAGE", name="service_status").create(bind, checkfirst=True)
+    postgresql.ENUM(
         "NEW", "QUEUED", "PROCESSING", "AWAITING_APPROVAL", "RESOLVED", "ESCALATED", "FAILED",
         name="ticket_status",
+    ).create(bind, checkfirst=True)
+    postgresql.ENUM("LOW", "MEDIUM", "HIGH", "CRITICAL", name="ticket_priority").create(bind, checkfirst=True)
+
+    # ...then build separate instances with create_type=False for use as
+    # column types below. Without this, create_table tries to CREATE TYPE a
+    # second time as a side effect of adding an enum column, with no
+    # checkfirst guard on that second attempt - it fails against a real
+    # database with "type already exists".
+    user_role = postgresql.ENUM("END_USER", "AGENT", "ADMIN", name="user_role", create_type=False)
+    service_status = postgresql.ENUM("OPERATIONAL", "DEGRADED", "OUTAGE", name="service_status", create_type=False)
+    ticket_status = postgresql.ENUM(
+        "NEW", "QUEUED", "PROCESSING", "AWAITING_APPROVAL", "RESOLVED", "ESCALATED", "FAILED",
+        name="ticket_status", create_type=False,
     )
-    ticket_priority = postgresql.ENUM("LOW", "MEDIUM", "HIGH", "CRITICAL", name="ticket_priority")
-    for enum in (user_role, service_status, ticket_status, ticket_priority):
-        enum.create(bind, checkfirst=True)
+    ticket_priority = postgresql.ENUM(
+        "LOW", "MEDIUM", "HIGH", "CRITICAL", name="ticket_priority", create_type=False
+    )
 
     op.create_table(
         "users",
