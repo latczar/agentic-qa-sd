@@ -111,7 +111,7 @@ Worker (AI orchestrator — trusted code, direct DB access for its own bookkeepi
 ```bash
 cp .env.example .env
 docker compose up --build   # postgres, rabbitmq, api, worker
-docker compose exec api python -m app.create_tables
+docker compose exec api alembic upgrade head
 docker compose exec api python -m app.seed
 curl http://localhost:8000/health
 curl http://localhost:8000/services
@@ -126,9 +126,18 @@ docker compose logs -f worker
 RabbitMQ management UI: http://localhost:15672 (login from your `.env`) — watch
 `ticket.processing`, `ticket.retry`, and `ticket.dead-letter` fill and drain there.
 
-Schema note: there's no Alembic yet. Phase 2 is the *first* schema, and Alembic's whole
-job is managing changes to one — it earns its place at Phase 4, when pgvector tables
-give us an actual second migration to write.
+Migrations now run through Alembic (`api/migrations/`), introduced at Phase 4 once
+there was an actual second schema change to manage. `0001_baseline.py` captures the
+Phase 2-3 schema exactly as it was — adopting Alembic didn't change anything for
+existing databases. If you had a dev database from before this phase, run
+`alembic stamp head` instead of `alembic upgrade head` once, so Alembic knows that
+schema already exists rather than trying to recreate it. A fresh database (or CI) just
+runs `alembic upgrade head` normally.
+
+Note: test databases (`service_desk_test`) still get their schema from
+`Base.metadata.create_all()` directly (see `shared/testing.py`), not from Alembic —
+tests are checking application logic against the current schema, not testing the
+migrations themselves, so the faster, simpler path is the right one there.
 
 ## Testing
 
