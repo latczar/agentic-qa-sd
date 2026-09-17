@@ -67,7 +67,10 @@ jobs:
 
       - name: Run API tests
         working-directory: api
-        run: pytest -v
+        # -m "not ollama" excludes the handful of tests that need a real model.
+        # They skip themselves when Ollama is unreachable anyway, but being
+        # explicit means CI never silently stops covering something.
+        run: pytest -v -m "not ollama"
 
       - name: Install worker dependencies
         working-directory: worker
