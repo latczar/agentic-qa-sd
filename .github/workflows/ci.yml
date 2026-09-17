@@ -41,6 +41,11 @@ jobs:
       DATABASE_URL: postgresql+psycopg://sd_user:sd_password@localhost:5432/service_desk
       TEST_DATABASE_URL: postgresql+psycopg://sd_user:sd_password@localhost:5432/service_desk_test
       RABBITMQ_URL: amqp://sd_user:sd_password@localhost:5672/
+      # There is no Ollama in CI, and there shouldn't be. Every test builds its
+      # own provider explicitly; this is belt and braces so a future test that
+      # calls get_embedding_provider() fails fast rather than hanging on a
+      # connection to nothing.
+      EMBEDDING_PROVIDER: fake
 
     steps:
       - uses: actions/checkout@v4

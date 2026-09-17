@@ -15,7 +15,7 @@ from shared.models import Base
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql+psycopg://sd_user:sd_password@localhost:5432/service_desk_test",
+    "postgresql+psycopg://sd_user:sd_password@localhost:5433/service_desk_test",
 )
 
 
@@ -41,6 +41,12 @@ test_engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
 
 @pytest.fixture(scope="session", autouse=True)
 def _schema():
+    # Tests build their schema straight from the models rather than by running
+    # migrations, so the extension Alembic would have switched on has to be
+    # switched on here too - otherwise the vector column has no type to use.
+    with test_engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
     Base.metadata.create_all(test_engine)
     yield
     Base.metadata.drop_all(test_engine)

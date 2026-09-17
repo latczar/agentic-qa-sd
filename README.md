@@ -11,8 +11,8 @@ output validation, and human-in-the-loop control — not just "call an LLM".
 
 [![CI](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml/badge.svg)](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml)
 
-Phase 3 of 12 — RabbitMQ queue and worker. See [Architecture](#architecture) for
-the full target design and [Phases](#phases) for what's built so far.
+Phase 4 of 12 — knowledge ingestion and pgvector. See [Architecture](#architecture)
+for the full target design and [Phases](#phases) for what's built so far.
 
 ## Architecture (target — built incrementally)
 
@@ -60,6 +60,28 @@ Worker (AI orchestrator — trusted code, direct DB access for its own bookkeepi
   the exact same models and database access as the API — it was deliberately *not*
   created in Phase 1/2, before there was a second real consumer to justify it.
 
+**Knowledge base and embeddings (Phase 4):**
+- Articles are plain markdown in `knowledge/` — filename is the slug, the first
+  `# ` line is the title. Source data lives at the repo root rather than inside
+  `api/` because it belongs to the whole system, not to one service.
+- One article = one embedding. No chunking: these articles are short enough to embed
+  whole, and chunking only earns its place if Phase 5 shows retrieval needs it.
+- `content_hash` (SHA-256 of title + body) is what makes re-ingestion cheap. Change one
+  article out of forty and exactly one embedding call is made, not forty. An article
+  whose embedding is NULL is always retried, even when its hash matches — otherwise a
+  run that failed partway could never repair itself.
+- `EMBEDDING_PROVIDER` picks between the real Ollama client and a deterministic fake
+  (`shared/embeddings.py`). The fake produces stable, correctly-shaped vectors that
+  carry no meaning — enough to test ingestion plumbing, which is why the whole suite
+  runs in CI with no model present. Judging retrieval *quality* needs the real model
+  and belongs in the Phase 11 evaluation suite.
+- No vector index yet. With a few dozen articles Postgres scans them all in well under
+  a millisecond, and an ivfflat index built on a near-empty table is worse than none.
+  It arrives in Phase 5, alongside real queries to measure it against.
+- Ollama runs on the host rather than in Compose — it wants GPU access and is shared
+  with other projects on the same machine. Containers reach it via
+  `host.docker.internal`.
+
 **Queue design (Phase 3):**
 - `ticket.processing` — the main work queue. The worker consumes here.
 - `ticket.retry` — has no consumer. A failed message is republished here with a
@@ -91,12 +113,16 @@ Worker (AI orchestrator — trusted code, direct DB access for its own bookkeepi
    proves the API can actually reach the database.
 2. **PostgreSQL schema and FastAPI ticket API** — `tickets`, `users`, `services`,
    `ticket_comments`, `audit_logs`; ticket CRUD, comments, user/service lookups.
-3. **RabbitMQ queue and worker** ← you are here — ticket creation publishes an event;
+3. **RabbitMQ queue and worker** — ticket creation publishes an event;
    a separate worker process consumes it with acknowledgements, exponential-backoff
    retries, a dead-letter queue, and idempotency via `processed_events`. The worker
    doesn't do anything AI-shaped yet (that's Phase 8) — it proves the async pipeline
    itself works: pick up a ticket, mark it `PROCESSING`, ack.
-4. Knowledge ingestion + pgvector
+4. **Knowledge ingestion + pgvector** ← you are here — markdown knowledge articles
+   in `knowledge/` are parsed, embedded with `nomic-embed-text`, and stored in a
+   `knowledge_articles` table with a `vector(768)` column. Re-running ingestion is
+   cheap: a SHA-256 content hash per article means unchanged articles are skipped
+   without an embedding call. Nothing searches them yet — that's Phase 5.
 5. RAG retrieval
 6. Ollama integration
 7. MCP server
@@ -113,6 +139,7 @@ cp .env.example .env
 docker compose up --build   # postgres, rabbitmq, api, worker
 docker compose exec api alembic upgrade head
 docker compose exec api python -m app.seed
+docker compose exec api python -m app.ingest_knowledge   # needs Ollama, see below
 curl http://localhost:8000/health
 curl http://localhost:8000/services
 
@@ -125,6 +152,20 @@ docker compose logs -f worker
 
 RabbitMQ management UI: http://localhost:15672 (login from your `.env`) — watch
 `ticket.processing`, `ticket.retry`, and `ticket.dead-letter` fill and drain there.
+
+Postgres is published on host port **5433**, not 5432, so this project can run at the
+same time as another local Postgres. Inside the Compose network it's still 5432.
+Override with `POSTGRES_HOST_PORT` in `.env` if 5433 is taken too.
+
+Ingestion needs Ollama running on the host with the embedding model pulled:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+Re-run `python -m app.ingest_knowledge` whenever you edit anything in `knowledge/`.
+It prints a `created / updated / unchanged / failed` summary and exits non-zero if any
+article failed, so it's safe to run on a schedule or in a script.
 
 Migrations now run through Alembic (`api/migrations/`), introduced at Phase 4 once
 there was an actual second schema change to manage. `0001_baseline.py` captures the
