@@ -53,6 +53,13 @@ jobs:
         working-directory: api
         run: pip install -r requirements.txt
 
+      - name: Verify Alembic migrations (upgrade, downgrade, upgrade again)
+        working-directory: api
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+
       - name: Run API tests
         working-directory: api
         run: pytest -v
