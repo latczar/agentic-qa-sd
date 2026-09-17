@@ -11,8 +11,8 @@ output validation, and human-in-the-loop control — not just "call an LLM".
 
 [![CI](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml/badge.svg)](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml)
 
-Phase 4 of 12 — knowledge ingestion and pgvector. See [Architecture](#architecture)
-for the full target design and [Phases](#phases) for what's built so far.
+Phase 5 of 12 — RAG retrieval. See [Architecture](#architecture) for the full
+target design and [Phases](#phases) for what's built so far.
 
 ## Architecture (target — built incrementally)
 
@@ -82,6 +82,28 @@ Worker (AI orchestrator — trusted code, direct DB access for its own bookkeepi
   with other projects on the same machine. Containers reach it via
   `host.docker.internal`.
 
+**Retrieval (Phase 5):**
+- `shared/retrieval.py` is plain Python running one SQL query. The LLM does not choose
+  what to retrieve; it is handed what this found. That keeps the retrieval step
+  testable and keeps a 7B model away from a job it is bad at.
+- Cosine distance (`<=>`), because `nomic-embed-text` returns unit-length vectors.
+  The HNSW index in migration 0003 is built with `vector_cosine_ops` to match — an
+  index built for one distance operator is ignored by queries using another.
+- HNSW rather than IVFFlat: IVFFlat picks its cluster centres from whatever rows exist
+  when the index is built, so building one on a nearly empty table produces a bad index
+  that stays bad until rebuilt. HNSW needs no training step.
+- `MAX_DISTANCE` (0.40) is the cutoff that makes "no relevant articles" a real answer,
+  and it was measured rather than guessed. Across ten questions against the shipped
+  knowledge base — eight with a known correct article, two deliberately off-topic — the
+  correct article scored 0.207–0.370 and everything else 0.348–0.711. The ranges overlap
+  slightly, so no threshold is perfect; 0.40 sits above every correct match, so the cost
+  of being wrong is occasionally letting a near-miss into a list of three rather than
+  silently dropping the right answer. Re-measure if the embedding model changes.
+  Returning nothing beats handing the model an irrelevant article and inviting a
+  confident wrong answer — this is the "no RAG hits" path the spec calls for.
+- A failure to embed the *question* raises rather than returning an empty list. A
+  caller has to be able to tell "nothing matched" from "retrieval broke".
+
 **Queue design (Phase 3):**
 - `ticket.processing` — the main work queue. The worker consumes here.
 - `ticket.retry` — has no consumer. A failed message is republished here with a
@@ -118,12 +140,16 @@ Worker (AI orchestrator — trusted code, direct DB access for its own bookkeepi
    retries, a dead-letter queue, and idempotency via `processed_events`. The worker
    doesn't do anything AI-shaped yet (that's Phase 8) — it proves the async pipeline
    itself works: pick up a ticket, mark it `PROCESSING`, ack.
-4. **Knowledge ingestion + pgvector** ← you are here — markdown knowledge articles
+4. **Knowledge ingestion + pgvector** — markdown knowledge articles
    in `knowledge/` are parsed, embedded with `nomic-embed-text`, and stored in a
    `knowledge_articles` table with a `vector(768)` column. Re-running ingestion is
    cheap: a SHA-256 content hash per article means unchanged articles are skipped
    without an embedding call. Nothing searches them yet — that's Phase 5.
-5. RAG retrieval
+5. **RAG retrieval** ← you are here — `search_knowledge()` embeds a question and
+   returns the nearest articles by cosine distance, with a relevance cutoff so an
+   unanswerable question returns nothing rather than the least bad article. An
+   HNSW index arrives with it. Nothing calls it yet — the worker starts using it
+   at Phase 8, through the MCP tools built at Phase 7.
 6. Ollama integration
 7. MCP server
 8. Agent orchestration
@@ -178,7 +204,12 @@ runs `alembic upgrade head` normally.
 Note: test databases (`service_desk_test`) still get their schema from
 `Base.metadata.create_all()` directly (see `shared/testing.py`), not from Alembic —
 tests are checking application logic against the current schema, not testing the
-migrations themselves, so the faster, simpler path is the right one there.
+migrations themselves, so the faster, simpler path is the right one there. One
+consequence worth knowing: the test database has no HNSW index, because that index is
+created by a migration rather than declared on the model. Retrieval results are
+identical either way (an index changes how Postgres finds rows, not which rows match),
+so the tests stay honest — but they are not measuring index behaviour, and aren't
+meant to.
 
 ## Testing
 
@@ -208,7 +239,8 @@ docker compose up -d postgres rabbitmq
 
 cd api
 pip install -r requirements.txt
-pytest
+pytest                   # includes the marked ollama tests if Ollama is running
+pytest -m "not ollama"   # what CI runs
 
 cd ../worker
 pip install -r requirements.txt
