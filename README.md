@@ -187,6 +187,7 @@ docker compose up --build   # postgres, rabbitmq, api, worker, mcp-server, n8n
 docker compose exec api alembic upgrade head
 docker compose exec api python -m app.seed
 docker compose exec api python -m app.ingest_knowledge   # needs Ollama, see below
+# Then open http://localhost:8000 - the demo UI is served by the API itself.
 curl http://localhost:8000/health
 curl http://localhost:8000/services
 
@@ -213,7 +214,19 @@ ollama pull qwen2.5:7b-instruct   # generation, tool-calling capable
 docker compose exec api python -m app.ingest_knowledge
 ```
 
-### Watching one ticket go through
+### The UI
+
+`http://localhost:8000` serves a single page: raise a ticket, watch it move
+through the pipeline, expand what the model actually said (root cause,
+resolution, confidence, which documents it cited, which it was shown), and
+approve or reject anything waiting on a human.
+
+Plain HTML and fetch against the same endpoints documented below - no build
+step, no npm, no separate frontend container to keep running. It polls every
+few seconds because tickets change state in the background while nobody is
+looking at them.
+
+### Watching one ticket go through the API directly
 
 ```bash
 curl -X POST http://localhost:8000/tickets -H "Content-Type: application/json"   -d '{"submitted_by_id": 1, "subject": "VPN keeps dropping after I changed my password",

@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Service Desk</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a2f3a;
+    --text: #e6e8ec;
+    --muted: #9aa3b2;
+    --accent: #5b8def;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --info: #58a6ff;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f7f9; --panel: #fff; --panel-2: #f0f2f5; --line: #dce0e6;
+      --text: #1b1f27; --muted: #5b6472;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 18px 16px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: 340px 1fr; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input, textarea, select, button {
+    font: inherit; width: 100%; padding: 9px 10px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+  }
+  textarea { min-height: 96px; resize: vertical; }
+  button { cursor: pointer; border-color: transparent; background: var(--accent); color: #fff; font-weight: 600; margin-top: 14px; }
+  button:disabled { opacity: .55; cursor: default; }
+  button.ghost { background: transparent; border-color: var(--line); color: var(--text); font-weight: 500; margin: 0; width: auto; padding: 6px 12px; }
+  button.approve { background: var(--ok); }
+  button.reject { background: var(--bad); }
+  .ticket { border: 1px solid var(--line); border-radius: 9px; padding: 12px; margin-bottom: 10px; background: var(--panel); }
+  .ticket .top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .ticket .subj { font-weight: 600; flex: 1; min-width: 200px; }
+  .id { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .badge { font-size: 11.5px; font-weight: 700; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+  .b-NEW, .b-QUEUED { color: var(--muted); border-color: var(--line); }
+  .b-PROCESSING { color: var(--info); border-color: var(--info); }
+  .b-AWAITING_APPROVAL { color: var(--warn); border-color: var(--warn); }
+  .b-RESOLVED { color: var(--ok); border-color: var(--ok); }
+  .b-ESCALATED, .b-FAILED { color: var(--bad); border-color: var(--bad); }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .analysis { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); font-size: 14px; display: grid; gap: 8px; }
+  .row { display: grid; grid-template-columns: 130px 1fr; gap: 10px; }
+  .row .k { color: var(--muted); font-size: 13px; }
+  .conf { display: inline-flex; align-items: center; gap: 8px; }
+  .bar { width: 110px; height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  .cites code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: 12.5px; margin-right: 6px; display: inline-block; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  .empty { color: var(--muted); padding: 24px; text-align: center; }
+  .err { color: var(--bad); font-size: 13px; margin-top: 8px; }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Service Desk</h1>
+  <span class="sub">local models · RAG over pgvector · human-in-the-loop</span>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="card">
+      <h2>Raise a ticket</h2>
+      <form id="new-ticket">
+        <label for="user">Reported by</label>
+        <select id="user" required></select>
+
+        <label for="subject">Subject</label>
+        <input id="subject" required maxlength="200" placeholder="VPN keeps dropping">
+
+        <label for="description">What's happening?</label>
+        <textarea id="description" required placeholder="Since changing my password the VPN disconnects every few minutes."></textarea>
+
+        <button type="submit" id="submit-btn">Submit ticket</button>
+        <div class="err" id="form-err" hidden></div>
+        <div class="note">Analysis runs asynchronously — the ticket appears immediately and updates once the worker has finished with it.</div>
+      </form>
+    </div>
+  </div>
+
+  <div>
+    <div class="card" style="margin-bottom:12px; display:flex; align-items:center; gap:10px;">
+      <h2 style="margin:0; flex:1">Tickets</h2>
+      <button class="ghost" id="refresh">Refresh</button>
+    </div>
+    <div id="tickets"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const analysisCache = {};
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail ?? detail; } catch {}
+    throw new Error(detail);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function loadUsers() {
+  const users = await api("/users");
+  $("#user").innerHTML = users
+    .map((u) => `<option value="${u.id}">${esc(u.name)} (${esc(u.role.toLowerCase())})</option>`)
+    .join("");
+}
+
+function analysisHtml(run) {
+  if (!run) return "";
+  if (run.status === "FAILED") {
+    return `<div class="analysis"><div class="row"><span class="k">AI run</span>
+      <span style="color:var(--bad)">failed — ${esc(run.error)}</span></div></div>`;
+  }
+  const o = run.output || {};
+  const pct = Math.round((o.confidence ?? 0) * 100);
+  const cites = (o.sources || []).map((s) => `<code>${esc(s.document)}</code>`).join("") || "<span class='k'>none cited</span>";
+  return `<div class="analysis">
+    <div class="row"><span class="k">Root cause</span><span>${esc(o.likely_root_cause) || "<span class='k'>not determined</span>"}</span></div>
+    <div class="row"><span class="k">Resolution</span><span>${esc(o.recommended_resolution) || "<span class='k'>none proposed</span>"}</span></div>
+    <div class="row"><span class="k">Confidence</span><span class="conf"><span class="bar"><i style="width:${pct}%"></i></span>${pct}%</span></div>
+    <div class="row cites"><span class="k">Sources</span><span>${cites}</span></div>
+    <div class="row"><span class="k">Model</span><span class="k">${esc(run.model)} · ${run.latency_ms} ms · retrieved ${esc((run.retrieved_slugs?.slugs || []).join(", ")) || "nothing"}</span></div>
+  </div>`;
+}
+
+function ticketHtml(t, run) {
+  const awaiting = t.status === "AWAITING_APPROVAL";
+  return `<div class="ticket" data-id="${t.id}">
+    <div class="top">
+      <span class="id">#${t.id}</span>
+      <span class="subj">${esc(t.subject)}</span>
+      <span class="badge b-${esc(t.status)}">${esc(t.status.replace(/_/g, " "))}</span>
+    </div>
+    <div class="meta">${esc(t.category) || "uncategorised"}${t.priority ? " · " + esc(t.priority) : ""}</div>
+    ${analysisHtml(run)}
+    <div class="actions">
+      <button class="ghost toggle">${analysisCache[t.id] ? "Hide" : "Show"} analysis</button>
+      ${awaiting ? `<input class="reason" placeholder="Reason (optional)" style="width:auto;flex:1;min-width:160px;margin:0">
+                    <button class="ghost approve" style="color:#fff;background:var(--ok);border-color:transparent">Approve</button>
+                    <button class="ghost reject" style="color:#fff;background:var(--bad);border-color:transparent">Reject</button>` : ""}
+    </div>
+  </div>`;
+}
+
+async function render() {
+  const tickets = await api("/tickets");
+  const el = $("#tickets");
+  if (!tickets.length) { el.innerHTML = `<div class="empty">No tickets yet.</div>`; return; }
+  el.innerHTML = tickets.map((t) => ticketHtml(t, analysisCache[t.id])).join("");
+}
+
+$("#tickets").addEventListener("click", async (e) => {
+  const card = e.target.closest(".ticket");
+  if (!card) return;
+  const id = Number(card.dataset.id);
+
+  if (e.target.classList.contains("toggle")) {
+    if (analysisCache[id]) delete analysisCache[id];
+    else {
+      const runs = await api(`/tickets/${id}/analysis`);
+      analysisCache[id] = runs[0] || null;
+      if (!runs.length) alert("No analysis recorded for this ticket yet.");
+    }
+    return render();
+  }
+
+  const decision = e.target.classList.contains("approve") ? "approve"
+                 : e.target.classList.contains("reject") ? "reject" : null;
+  if (!decision) return;
+
+  const reason = card.querySelector(".reason")?.value.trim() || null;
+  e.target.disabled = true;
+  try {
+    await api(`/tickets/${id}/${decision}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decided_by_id: Number($("#user").value) || null, reason }),
+    });
+    await render();
+  } catch (err) {
+    alert(err.message);
+    e.target.disabled = false;
+  }
+});
+
+$("#new-ticket").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("#submit-btn"), err = $("#form-err");
+  btn.disabled = true; err.hidden = true;
+  try {
+    await api("/tickets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        submitted_by_id: Number($("#user").value),
+        subject: $("#subject").value,
+        description: $("#description").value,
+      }),
+    });
+    $("#subject").value = ""; $("#description").value = "";
+    await render();
+  } catch (e2) {
+    err.textContent = e2.message; err.hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("#refresh").addEventListener("click", render);
+
+// Tickets change state in the background as the worker gets to them, so poll
+// rather than making someone press refresh to find out what happened.
+setInterval(() => {
+  const typing = document.activeElement;
+  if (typing && typing.classList.contains("reason") && typing.value) return;
+  render();
+}, 4000);
+
+loadUsers().then(render).catch((e) => {
+  $("#tickets").innerHTML = `<div class="empty err">Could not reach the API: ${esc(e.message)}</div>`;
+});
+</script>
+</body>
+</html>
