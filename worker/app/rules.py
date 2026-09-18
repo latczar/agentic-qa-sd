@@ -4,6 +4,18 @@ Plain if/else on purpose. This is the one place in the system where the
 question "is the AI allowed to proceed on its own" gets answered, and it
 should be readable by someone who doesn't write Python. The model gets no
 say in it - it reports a confidence, this decides what that's worth.
+
+The shape of this file is a direct result of the evaluation suite. The first
+version matched a list of single words against the model's own output and
+scored 54% on escalation correctness - worse in both directions at once:
+
+  - "delete" fired on "delete the stuck print job" and "delete the saved
+    credential", escalating fourteen routine tickets that needed no review;
+  - genuinely sensitive payroll tickets slipped through, because the check
+    only ever saw the model's wording, and a payroll ticket categorised as
+    "Access" with a resolution that never says "payroll" matched nothing.
+
+So the two questions are now asked separately, of different sources.
 """
 
 from dataclasses import dataclass
@@ -16,19 +28,41 @@ from shared.models import Priority
 # answer on a real incident is much higher.
 CONFIDENCE_THRESHOLD = 0.85
 
-# Categories where a wrong automated answer does real damage, regardless of how
-# confident the model claims to be. Matched case-insensitively against the
-# model's own category and its recommended resolution.
-SENSITIVE_KEYWORDS = (
-    "security",
-    "breach",
-    "data loss",
-    "delete",
-    "wipe",
+# Subject areas where a wrong automated answer does real damage. Matched
+# against the ticket and the service it affects - NOT the model's output - so
+# that a sensitive ticket stays sensitive however the model chooses to word
+# its answer.
+SENSITIVE_DOMAINS = (
     "payroll",
-    "permission",
-    "access grant",
+    "payslip",
+    "salary",
+    "expenses",
+    "security incident",
+    "breach",
+    "malware",
+    "ransomware",
+    "gdpr",
+    "personal data",
+)
+
+# Actions that are destructive or privilege-changing. Deliberately phrases
+# rather than single words: "delete the mailbox" is not "delete the stuck
+# print job", and the first version couldn't tell them apart.
+DESTRUCTIVE_ACTIONS = (
+    "delete the account",
+    "delete the mailbox",
+    "delete the user",
+    "remove the account",
+    "wipe",
+    "factory reset",
+    "restore from backup",
+    "grant admin",
     "admin rights",
+    "elevate",
+    "escalate privileges",
+    "revoke access",
+    "disable the account",
+    "reset all",
 )
 
 
@@ -38,13 +72,28 @@ class Gate:
     reason: str
 
 
-def evaluate(analysis: TicketAnalysis) -> Gate:
-    """Decide whether this analysis can stand as an automatic recommendation."""
-    haystack = f"{analysis.category} {analysis.recommended_resolution}".lower()
-    sensitive = [word for word in SENSITIVE_KEYWORDS if word in haystack]
+def evaluate(analysis: TicketAnalysis, ticket_context: str = "") -> Gate:
+    """Decide whether this analysis can stand as an automatic recommendation.
 
+    `ticket_context` is the ticket's own words plus the affected service -
+    what the user actually reported, independent of how the model summarised
+    it. Sensitivity is judged from that; destructiveness from the proposed
+    action.
+    """
+    domain_haystack = f"{ticket_context} {analysis.affected_service or ''}".lower()
+    sensitive = [word for word in SENSITIVE_DOMAINS if word in domain_haystack]
     if sensitive:
-        return Gate(True, f"sensitive topic ({', '.join(sensitive)}) always needs human approval")
+        return Gate(True, f"sensitive subject ({', '.join(sensitive)}) always needs human approval")
+
+    action_haystack = (analysis.recommended_resolution or "").lower()
+    destructive = [phrase for phrase in DESTRUCTIVE_ACTIONS if phrase in action_haystack]
+    if destructive:
+        return Gate(True, f"destructive action proposed ({', '.join(destructive)})")
+
+    if not analysis.recommended_resolution:
+        # Nothing to act on. Whatever the model's confidence says, there is no
+        # recommendation here to approve automatically.
+        return Gate(True, "no resolution was proposed")
 
     if not analysis.sources:
         # No cited evidence means the answer came from the model's own memory
