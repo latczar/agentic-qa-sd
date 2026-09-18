@@ -11,10 +11,14 @@ output validation, and human-in-the-loop control — not just "call an LLM".
 
 [![CI](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml/badge.svg)](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml)
 
-Phase 9 of 12 — the full pipeline runs end to end: a ticket is queued, analysed
-by a local model against retrieved knowledge, gated on confidence and risk, and
-either auto-recommended or routed to a human for approval. See
-[Architecture](#architecture) for the design and [Phases](#phases) for what's built.
+Phases 1-11 of 12. The full pipeline runs end to end on a laptop: a ticket is
+queued, analysed by a local model against knowledge retrieved through MCP,
+gated on confidence and risk, and either auto-recommended or routed to a human
+whose decision comes back through n8n. Measured against a 40-case evaluation
+set, not eyeballed - and the evaluation has already caught two escalation bugs
+that 75 passing unit tests did not.
+
+Everything runs locally: no paid APIs, no cloud services, no API keys.
 
 ## Architecture
 
@@ -299,6 +303,25 @@ What it measures and why:
 The retrieval-only mode exits non-zero below an 80% hit rate, so it can gate a
 change rather than being a document nobody reads.
 
+### What it actually caught
+
+The first full run scored **54.1% on escalation correctness** - worse than a
+coin flip - while all 75 unit tests passed. The tests verified the gate did
+what it was told; the evaluation asked whether what it was told was right.
+
+Two bugs, in opposite directions:
+
+- Fourteen routine tickets escalated for review they didn't need, because a
+  bare `delete` matched "delete the stuck print job".
+- Three payroll tickets - genuinely sensitive - were auto-resolved with no
+  human review at all, because the check only ever saw the model's summary,
+  which had labelled them "Access" and never used the word payroll.
+
+The second is the one worth dwelling on: no unit test could have caught it,
+because the unit tests asserted the same flawed assumption the code made.
+Fixes and before/after numbers are in `eval/results_before.md` and
+`eval/results.md`.
+
 ## Failure handling
 
 | Failure | Behaviour |
@@ -315,36 +338,36 @@ change rather than being a document nobody reads.
 
 ## Testing
 
-API tests (ticket/user/service CRUD) hit a real Postgres — no SQLite stand-in — using a
-separate `service_desk_test` database (created automatically) and one transaction per
-test, rolled back afterwards, so nothing leaks between tests or touches your dev data.
-One test also hits a real RabbitMQ to prove `POST /tickets` actually publishes.
+Three suites, 75 tests, all against a real Postgres - no SQLite stand-in.
 
-Known limitation: tests use a dedicated Postgres database but share the *same*
-RabbitMQ instance and queues as local dev — there's no test vhost. Running the test
-suite repeatedly against your local `docker compose` RabbitMQ can leave a few
-dead-lettered messages referencing ticket IDs that only exist in the test database.
-That's not silent corruption — it's the dead-letter queue correctly doing its job for
-an unrecognised ticket reference — just noise you can clear from the management UI.
-Worth fixing with a separate vhost if this ever needed to run somewhere test/dev
-isolation actually mattered; not worth the complexity for a local portfolio project.
+- **api** (45) - ticket CRUD, approvals, the validate-and-retry loop, the n8n
+  notifier, and one real AMQP round-trip.
+- **worker** (30) - queue plumbing (ack, retry, dead-letter, idempotency),
+  orchestration against a scripted model, and the approval gate.
+- **mcp_server** (8) - what each tool returns, refuses, and clamps.
 
-Worker tests use a different isolation strategy: `on_message` manages its own database
-session per call (there's no per-request scope like FastAPI's `Depends` to swap out),
-so the worker's database connection is pointed at the real test database for the whole
-test run instead, and tests use unique data per test rather than a rollback. Retry,
-dead-letter, and idempotency logic is tested directly against `on_message` with a fake
-RabbitMQ channel — no live RabbitMQ needed for those, only Postgres.
+No test needs Ollama, an MCP server or n8n running: the model is swapped for a
+fake, retrieval runs in-process, and an empty webhook URL makes the notifier a
+no-op. The few tests that do want a real model are marked `ollama`, skip
+themselves when it's unreachable, and are excluded in CI.
+
+Two different isolation strategies, for a reason worth knowing. API tests wrap
+each test in one transaction and roll it back. Worker and MCP tests can't: the
+code under test opens its own database session, and an uncommitted transaction
+on one Postgres connection is invisible to another - so those commit for real
+and use unique data per test instead.
 
 ```bash
 docker compose up -d postgres rabbitmq
 
-cd api
-pip install -r requirements.txt
-pytest                   # includes the marked ollama tests if Ollama is running
-pytest -m "not ollama"   # what CI runs
-
-cd ../worker
-pip install -r requirements.txt
-pytest
+cd api        && pip install -r requirements.txt && pytest -m "not ollama"
+cd worker     && pip install -r requirements.txt && pytest
+cd mcp_server && pip install -r requirements.txt && pytest
 ```
+
+Known limitation: tests use a dedicated Postgres database but share the same
+RabbitMQ instance and queues as local dev - there is no test vhost. Running the
+suite repeatedly can leave a few dead-lettered messages referencing ticket ids
+that only exist in the test database. That is the dead-letter queue correctly
+doing its job for an unrecognised reference, not silent corruption, but it is
+noise you may want to clear from the management UI.
