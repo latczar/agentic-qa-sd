@@ -46,6 +46,13 @@ jobs:
       # calls get_embedding_provider() fails fast rather than hanging on a
       # connection to nothing.
       EMBEDDING_PROVIDER: fake
+      LLM_PROVIDER: fake
+      # No MCP server in CI: orchestration tests cover everything downstream of
+      # retrieval, and the MCP tools are tested directly in mcp_server/tests.
+      RETRIEVAL_MODE: direct
+      # No n8n either. Empty means the notifier is a no-op rather than spending
+      # every test run waiting on a connection to nothing.
+      N8N_WEBHOOK_URL: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -78,4 +85,12 @@ jobs:
 
       - name: Run worker tests
         working-directory: worker
+        run: pytest -v
+
+      - name: Install MCP server dependencies
+        working-directory: mcp_server
+        run: pip install -r requirements.txt
+
+      - name: Run MCP server tests
+        working-directory: mcp_server
         run: pytest -v

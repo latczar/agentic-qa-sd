@@ -11,8 +11,10 @@ output validation, and human-in-the-loop control — not just "call an LLM".
 
 [![CI](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml/badge.svg)](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml)
 
-Phase 5 of 12 — RAG retrieval. See [Architecture](#architecture) for the full
-target design and [Phases](#phases) for what's built so far.
+Phase 9 of 12 — the full pipeline runs end to end: a ticket is queued, analysed
+by a local model against retrieved knowledge, gated on confidence and risk, and
+either auto-recommended or routed to a human for approval. See
+[Architecture](#architecture) for the design and [Phases](#phases) for what's built.
 
 ## Architecture (target — built incrementally)
 
@@ -145,15 +147,19 @@ Worker (AI orchestrator — trusted code, direct DB access for its own bookkeepi
    `knowledge_articles` table with a `vector(768)` column. Re-running ingestion is
    cheap: a SHA-256 content hash per article means unchanged articles are skipped
    without an embedding call. Nothing searches them yet — that's Phase 5.
-5. **RAG retrieval** ← you are here — `search_knowledge()` embeds a question and
+5. **RAG retrieval** — `search_knowledge()` embeds a question and
    returns the nearest articles by cosine distance, with a relevance cutoff so an
    unanswerable question returns nothing rather than the least bad article. An
    HNSW index arrives with it. Nothing calls it yet — the worker starts using it
    at Phase 8, through the MCP tools built at Phase 7.
-6. Ollama integration
-7. MCP server
-8. Agent orchestration
-9. Human approval + n8n
+6. **Ollama integration** — real/fake provider split for the generation model,
+   Pydantic-validated structured output, retry with the validation error fed back.
+7. **MCP server** — three narrow tools over streamable HTTP. The worker really
+   routes retrieval through it; there is no raw-SQL tool by design.
+8. **Agent orchestration** — retrieve, prompt, validate, gate, persist. Order
+   decided in Python; the model only supplies the judgement in the middle.
+9. **Human approval + n8n** ← you are here — `/approve` and `/reject`, plus a
+   webhook to n8n that branches on priority.
 10. Failure handling / retries / DLQ
 11. Evaluation suite
 12. Documentation and demo
@@ -162,7 +168,7 @@ Worker (AI orchestrator — trusted code, direct DB access for its own bookkeepi
 
 ```bash
 cp .env.example .env
-docker compose up --build   # postgres, rabbitmq, api, worker
+docker compose up --build   # postgres, rabbitmq, api, worker, mcp-server, n8n
 docker compose exec api alembic upgrade head
 docker compose exec api python -m app.seed
 docker compose exec api python -m app.ingest_knowledge   # needs Ollama, see below
@@ -178,6 +184,51 @@ docker compose logs -f worker
 
 RabbitMQ management UI: http://localhost:15672 (login from your `.env`) — watch
 `ticket.processing`, `ticket.retry`, and `ticket.dead-letter` fill and drain there.
+n8n: http://localhost:5679 (import `n8n/workflows/ticket-approval.json`).
+
+Host ports are deliberately shifted where the sibling `ai-auto` project already
+uses the default: Postgres on 5433, n8n on 5679. Both stacks can run at once.
+
+Ollama runs on the host rather than in Compose — it wants GPU access and is
+shared with other projects. Containers reach it via `host.docker.internal`.
+
+```bash
+ollama pull nomic-embed-text      # embeddings, 768 dimensions
+ollama pull qwen2.5:7b-instruct   # generation, tool-calling capable
+docker compose exec api python -m app.ingest_knowledge
+```
+
+### Watching one ticket go through
+
+```bash
+curl -X POST http://localhost:8000/tickets -H "Content-Type: application/json"   -d '{"submitted_by_id": 1, "subject": "VPN keeps dropping after I changed my password",
+       "description": "The VPN disconnects every few minutes since my password change."}'
+
+curl http://localhost:8000/tickets/1            # NEW -> QUEUED -> PROCESSING -> AWAITING_APPROVAL
+curl http://localhost:8000/tickets/1/analysis   # what the model actually said, and why
+curl -X POST http://localhost:8000/tickets/1/approve   -H "Content-Type: application/json" -d '{"decided_by_id": 2, "reason": "Checked, correct"}'
+```
+
+## How a decision gets made
+
+The model reports a confidence. It does not decide whether that is good enough —
+[`worker/app/rules.py`](worker/app/rules.py) does, in plain if/else:
+
+| Condition | Outcome |
+| --- | --- |
+| Sensitive topic (security, payroll, delete, permissions…) | Always human approval |
+| No knowledge articles cited | Always human approval — the answer came from the model's memory, not our evidence |
+| Confidence < 0.85 | Human approval |
+| CRITICAL priority | Human approval |
+| Otherwise | Auto-recommended |
+
+Approve resolves the ticket; reject escalates it, because a human disagreeing
+means it still needs solving by someone else.
+
+**Known rough edge:** the sensitive-topic check is naive substring matching, so
+a resolution saying "delete the saved credential entry" trips the `delete`
+keyword and asks for approval it doesn't need. It errs toward human review,
+which is the safe direction, but it fires more often than it should.
 
 Postgres is published on host port **5433**, not 5432, so this project can run at the
 same time as another local Postgres. Inside the Compose network it's still 5432.
