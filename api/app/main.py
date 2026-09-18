@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
-from app.routers import services, tickets, users
+from app.routers import approvals, services, tickets, users
 from shared.db import ping_database
 
 app = FastAPI(title="AI Service Desk Agent")
@@ -11,6 +11,7 @@ app = FastAPI(title="AI Service Desk Agent")
 STATIC_DIR = Path(__file__).parent / "static"
 
 app.include_router(tickets.router)
+app.include_router(approvals.router)
 app.include_router(users.router)
 app.include_router(services.router)
 
