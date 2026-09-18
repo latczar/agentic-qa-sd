@@ -21,9 +21,10 @@ the left submits a new one.
 the same place, because where it lands depends on evidence and confidence, not
 on the category.
 
-Then point at the difference between *"Approved by Priya Nandakumar — ill see
-what i can do"* and *"Auto-recommended — no human review required"*. Both are
-`RESOLVED`. Only one of them was decided by a person.
+Then point at the difference between *"Priya Nandakumar approved the agent's
+proposed action — ill see what i can do"* and *"Auto-recommended — no human
+review required"*. Both are `RESOLVED`. Only one of them was decided by a
+person.
 
 **Talking point — "who actually made this decision?"**
 This line was added because a screenshot made its absence obvious: the list
@@ -31,6 +32,19 @@ showed `RESOLVED` identically whether the AI recommended it or an agent signed
 it off, and that is the single distinction a human-in-the-loop system must not
 hide. It comes from `GET /approvals`, one joined query for the whole list
 rather than a lookup per row.
+
+**Talking point — "approved what, exactly?"**
+The wording is *"X approved the agent's proposed action"*, not *"Approved by
+X"*, and the buttons say **Approve action** rather than **Approve**. That is
+not fussiness. What a reviewer approves is the agent's recommendation, and that
+recommendation is frequently a *refusal*. On a ticket titled *"can i check your
+payslip"*, a bare "Approved by Jamie Whitfield" reads as *Jamie granted the
+request* — the precise opposite of an action that says deny it.
+
+The gate fired correctly, the database recorded it correctly, and the screen
+still told the wrong story. Worth saying out loud: the hard part of
+human-in-the-loop is not building the gate, it is making the decision legible
+afterwards, because in a real incident review the record is all anyone has.
 
 **Talking point — "why is this asynchronous?"**
 A local model takes 2-15 seconds to answer. Doing that inside the HTTP request
@@ -146,3 +160,12 @@ Worth saying out loud rather than being caught by them:
 - Category accuracy moved 87.5% -> 81.2% between two runs with no change to
   categorisation code. That is single-run variance, and a serious evaluation
   would average several runs per case.
+- `INJECTION_MARKERS` is a blocklist. It stopped all twelve attacks in
+  `eval/injection_results.md`, and rephrasing would get past it. It raises the
+  cost of an attack; it is not a boundary.
+- Prompt hardening showed no measurable effect on that run — the model reported
+  confidence 1.00 on the same cases as before. Every attack was stopped by the
+  deterministic checks. Worth saying plainly rather than claiming three fixes
+  all worked.
+- The adversarial set is 12 cases and one run each. Enough to find a real bug,
+  not enough to claim a rate.
