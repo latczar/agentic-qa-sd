@@ -122,8 +122,14 @@ def run(
         raise RetryableOrchestrationError(str(exc)) from exc
 
     # The gate judges sensitivity from what the user actually reported, not
-    # from how the model summarised it.
-    gate = rules.evaluate(analysis, ticket_context=f"{ticket.subject} {ticket.description}")
+    # from how the model summarised it, and verifies citations against what
+    # retrieval actually returned rather than trusting the model to only name
+    # documents it was given.
+    gate = rules.evaluate(
+        analysis,
+        ticket_context=f"{ticket.subject} {ticket.description}",
+        retrieved_slugs=[a.slug for a in articles],
+    )
     _apply(db, ticket, analysis, gate)
 
     db.add(

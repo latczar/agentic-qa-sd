@@ -52,6 +52,15 @@ LOW_CONFIDENCE_RESPONSE = json.dumps(
 )
 
 
+TICKET_SUBJECT = "Cannot log in after password reset"
+TICKET_DESCRIPTION = "I reset my password but still cannot log in."
+# What orchestrator.run embeds to search with: subject and description joined.
+# The seeded article is embedded from this exact string so that retrieval
+# genuinely returns it under FakeEmbeddingProvider, which is deterministic on
+# its input but gives unrelated vectors for any two different inputs.
+TICKET_QUERY = f"{TICKET_SUBJECT}\n{TICKET_DESCRIPTION}"
+
+
 def make_ticket(db: Session) -> Ticket:
     """Each call gets a genuinely unique user.
 
@@ -67,8 +76,8 @@ def make_ticket(db: Session) -> Ticket:
 
     ticket = Ticket(
         submitted_by_id=user.id,
-        subject="Cannot log in after password reset",
-        description="I reset my password but still cannot log in.",
+        subject=TICKET_SUBJECT,
+        description=TICKET_DESCRIPTION,
     )
     db.add(ticket)
     db.commit()
@@ -87,17 +96,31 @@ def seeded(db_session: Session):
     if not db_session.query(Service).filter_by(name="Identity Service").first():
         db_session.add(Service(name="Identity Service", status=ServiceStatus.OPERATIONAL))
 
-    if not db_session.query(KnowledgeArticle).filter_by(slug="password-reset").first():
-        provider = FakeEmbeddingProvider()
+    # Embedded with the *ticket's* query text, not the article's own words.
+    # FakeEmbeddingProvider hashes its input, so two different strings give two
+    # unrelated vectors and retrieval returns nothing at all - which is how
+    # these tests used to run. That went unnoticed while the gate only asked
+    # whether a citation existed; once it started checking citations against
+    # what was actually retrieved, GOOD_RESPONSE was citing a document the
+    # model had never been shown, and the ticket correctly stopped resolving.
+    provider = FakeEmbeddingProvider()
+    matching_embedding = provider.embed(TICKET_QUERY)
+
+    article = db_session.query(KnowledgeArticle).filter_by(slug="password-reset").first()
+    if article is None:
         db_session.add(
             KnowledgeArticle(
                 slug="password-reset",
                 title="Resetting your password",
                 body="Use the self-service portal.",
                 content_hash="hash-password-reset",
-                embedding=provider.embed("Resetting your password\nUse the self-service portal."),
+                embedding=matching_embedding,
             )
         )
+    else:
+        # Worker tests commit for real, so a row seeded by an earlier run
+        # persists. Set it every time rather than only on insert.
+        article.embedding = matching_embedding
 
     db_session.commit()
     return db_session
