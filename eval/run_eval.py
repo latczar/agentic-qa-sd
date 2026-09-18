@@ -112,7 +112,7 @@ def run_case(db, case: dict, embed_provider, llm_provider, retrieval_only: bool)
         result.latency_ms = int((time.monotonic() - started) * 1000)
         return result
 
-    gate = rules.evaluate(analysis)
+    gate = rules.evaluate(analysis, ticket_context=f"{case['subject']} {case['description']}")
     keywords = [k.lower() for k in case["expected_category_keywords"]]
 
     result.structured_ok = True

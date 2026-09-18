@@ -121,7 +121,9 @@ def run(
         # another go later; it is not a permanent property of this ticket.
         raise RetryableOrchestrationError(str(exc)) from exc
 
-    gate = rules.evaluate(analysis)
+    # The gate judges sensitivity from what the user actually reported, not
+    # from how the model summarised it.
+    gate = rules.evaluate(analysis, ticket_context=f"{ticket.subject} {ticket.description}")
     _apply(db, ticket, analysis, gate)
 
     db.add(

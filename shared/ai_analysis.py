@@ -22,8 +22,14 @@ class TicketAnalysis(BaseModel):
     category: str
     priority: Priority
     affected_service: str | None
-    likely_root_cause: str
-    recommended_resolution: str
+    # Nullable because "I don't know" is a legitimate answer. Evaluation showed
+    # the model returning null for both of these on out-of-scope tickets - it
+    # genuinely has no root cause for "what is the capital of France" - and a
+    # non-null requirement was demanding it invent one to pass validation.
+    # Forcing a model to fill a field is a good way to manufacture a
+    # hallucination.
+    likely_root_cause: str | None
+    recommended_resolution: str | None
     confidence: float = Field(ge=0.0, le=1.0)
     sources: list[Source]
 
