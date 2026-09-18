@@ -72,6 +72,12 @@
   .empty { color: var(--muted); padding: 24px; text-align: center; }
   .err { color: var(--bad); font-size: 13px; margin-top: 8px; }
   .note { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
+  .decided { font-size: 12.5px; margin-top: 6px; padding: 5px 9px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line); }
+  .decided b { font-weight: 650; }
+  .decided.approved b { color: var(--ok); }
+  .decided.rejected b { color: var(--bad); }
+  .decided .why { color: var(--muted); }
+  .by-ai { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -113,6 +119,7 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const analysisCache = {};
+let approvalsByTicket = {};
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -154,6 +161,24 @@ function analysisHtml(run) {
   </div>`;
 }
 
+function decisionHtml(t) {
+  const a = approvalsByTicket[t.id];
+  if (a) {
+    // Who actually decided this. Without it, a RESOLVED ticket looks the same
+    // whether the AI recommended it or a person signed it off - which is the
+    // one thing a human-in-the-loop system must not hide.
+    const verb = a.decision === "APPROVED" ? "Approved" : "Rejected";
+    const cls = a.decision === "APPROVED" ? "approved" : "rejected";
+    const who = esc(a.decided_by_name) || "someone";
+    const why = a.reason ? ` <span class="why">— ${esc(a.reason)}</span>` : "";
+    return `<div class="decided ${cls}"><b>${verb} by ${who}</b>${why}</div>`;
+  }
+  if (t.status === "RESOLVED") {
+    return `<div class="by-ai">Auto-recommended — no human review required</div>`;
+  }
+  return "";
+}
+
 function ticketHtml(t, run) {
   const awaiting = t.status === "AWAITING_APPROVAL";
   return `<div class="ticket" data-id="${t.id}">
@@ -163,6 +188,7 @@ function ticketHtml(t, run) {
       <span class="badge b-${esc(t.status)}">${esc(t.status.replace(/_/g, " "))}</span>
     </div>
     <div class="meta">${esc(t.category) || "uncategorised"}${t.priority ? " · " + esc(t.priority) : ""}</div>
+    ${decisionHtml(t)}
     ${analysisHtml(run)}
     <div class="actions">
       <button class="ghost toggle">${analysisCache[t.id] ? "Hide" : "Show"} analysis</button>
@@ -174,7 +200,10 @@ function ticketHtml(t, run) {
 }
 
 async function render() {
-  const tickets = await api("/tickets");
+  const [tickets, approvals] = await Promise.all([api("/tickets"), api("/approvals")]);
+  // Newest first from the API, so the first one seen per ticket is the latest.
+  approvalsByTicket = {};
+  for (const a of approvals) if (!approvalsByTicket[a.ticket_id]) approvalsByTicket[a.ticket_id] = a;
   const el = $("#tickets");
   if (!tickets.length) { el.innerHTML = `<div class="empty">No tickets yet.</div>`; return; }
   el.innerHTML = tickets.map((t) => ticketHtml(t, analysisCache[t.id])).join("");

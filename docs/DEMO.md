@@ -16,9 +16,21 @@ paid API, no network egress, no API key.
 **What you're looking at:** every ticket and the state it reached. The form on
 the left submits a new one.
 
-**Point at:** the badges. `RESOLVED`, `AWAITING_APPROVAL`, `ESCALATED` — the
-same ticket type does not always land in the same place, because where it lands
-depends on evidence and confidence, not on the category.
+**Point at:** the badges, and the line under each one. `RESOLVED`,
+`AWAITING_APPROVAL`, `ESCALATED` — the same ticket type does not always land in
+the same place, because where it lands depends on evidence and confidence, not
+on the category.
+
+Then point at the difference between *"Approved by Priya Nandakumar — ill see
+what i can do"* and *"Auto-recommended — no human review required"*. Both are
+`RESOLVED`. Only one of them was decided by a person.
+
+**Talking point — "who actually made this decision?"**
+This line was added because a screenshot made its absence obvious: the list
+showed `RESOLVED` identically whether the AI recommended it or an agent signed
+it off, and that is the single distinction a human-in-the-loop system must not
+hide. It comes from `GET /approvals`, one joined query for the whole list
+rather than a lookup per row.
 
 **Talking point — "why is this asynchronous?"**
 A local model takes 2-15 seconds to answer. Doing that inside the HTTP request
@@ -129,9 +141,6 @@ good at: notification, branching, waiting on a person.
 
 Worth saying out loud rather than being caught by them:
 
-- The list shows `RESOLVED` identically whether the AI resolved it or a human
-  approved it. That distinction is the most important one in a
-  human-in-the-loop system and currently only lives in the audit log.
 - The evaluation set still only references the original 8 knowledge articles,
   so the 12 added later are not exercised by it.
 - Category accuracy moved 87.5% -> 81.2% between two runs with no change to

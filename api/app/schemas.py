@@ -107,3 +107,15 @@ class AgentRunOut(BaseModel):
     confidence: float | None
     error: str | None
     created_at: datetime
+
+
+class ApprovalLogOut(BaseModel):
+    """An approval with the decider's name resolved, for list views."""
+
+    id: int
+    ticket_id: int
+    decision: ApprovalDecision
+    decided_by_id: int | None
+    decided_by_name: str | None
+    reason: str | None
+    created_at: datetime
