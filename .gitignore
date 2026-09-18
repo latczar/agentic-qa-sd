@@ -12,6 +12,9 @@ venv/
 # Docker
 *.log
 
+# Eval scratch output (results.md is committed, the progress logs are not)
+eval/_*.log
+
 # Editors
 .vscode/
 .idea/
