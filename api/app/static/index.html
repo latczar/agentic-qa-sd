@@ -167,11 +167,19 @@ function decisionHtml(t) {
     // Who actually decided this. Without it, a RESOLVED ticket looks the same
     // whether the AI recommended it or a person signed it off - which is the
     // one thing a human-in-the-loop system must not hide.
-    const verb = a.decision === "APPROVED" ? "Approved" : "Rejected";
+    //
+    // "approved the agent's proposed action", not a bare "Approved by": what
+    // gets approved here is the agent's recommendation, which is often a
+    // refusal. On a ticket reading "can i check your payslip", a bare
+    // "Approved by Jamie Whitfield" is read as "Jamie granted the request" -
+    // the exact opposite of a proposed action that says deny it. The record is
+    // the only thing an incident review has, so it has to survive being
+    // skim-read.
+    const verb = a.decision === "APPROVED" ? "approved" : "rejected";
     const cls = a.decision === "APPROVED" ? "approved" : "rejected";
-    const who = esc(a.decided_by_name) || "someone";
+    const who = esc(a.decided_by_name) || "Someone";
     const why = a.reason ? ` <span class="why">— ${esc(a.reason)}</span>` : "";
-    return `<div class="decided ${cls}"><b>${verb} by ${who}</b>${why}</div>`;
+    return `<div class="decided ${cls}"><b>${who} ${verb} the agent's proposed action</b>${why}</div>`;
   }
   if (t.status === "RESOLVED") {
     return `<div class="by-ai">Auto-recommended — no human review required</div>`;
@@ -193,8 +201,8 @@ function ticketHtml(t, run) {
     <div class="actions">
       <button class="ghost toggle">${analysisCache[t.id] ? "Hide" : "Show"} analysis</button>
       ${awaiting ? `<input class="reason" placeholder="Reason (optional)" style="width:auto;flex:1;min-width:160px;margin:0">
-                    <button class="ghost approve" style="color:#fff;background:var(--ok);border-color:transparent">Approve</button>
-                    <button class="ghost reject" style="color:#fff;background:var(--bad);border-color:transparent">Reject</button>` : ""}
+                    <button class="ghost approve" style="color:#fff;background:var(--ok);border-color:transparent">Approve action</button>
+                    <button class="ghost reject" style="color:#fff;background:var(--bad);border-color:transparent">Reject action</button>` : ""}
     </div>
   </div>`;
 }
