@@ -214,6 +214,17 @@ ollama pull qwen2.5:7b-instruct   # generation, tool-calling capable
 docker compose exec api python -m app.ingest_knowledge
 ```
 
+### Demo
+
+![Ticket list](docs/media/01-ticket-list.png)
+
+A correct answer the system still refused to act on, because it had no evidence
+behind it - the strongest single frame in the project:
+
+![Analysis panel](docs/media/02-analysis-resolved.png)
+
+Full walkthrough with talking points for each screen: **[docs/DEMO.md](docs/DEMO.md)**.
+
 ### The UI
 
 `http://localhost:8000` serves a single page: raise a ticket, watch it move
