@@ -333,6 +333,7 @@ Fixes and before/after numbers are in `eval/results_before.md` and
 | Retrieval itself fails (can't embed) | Distinct from "found nothing" — retryable, and recorded as a failed agent run |
 | MCP server unreachable | Retryable, same path as a model failure |
 | Duplicate queue message | Skipped via `processed_events`, keyed on the publisher's `event_id` |
+| Same ticket published twice under *different* event ids | The event check can't see this - both messages are legitimately new. A state guard refuses to re-analyse a ticket that is already `AWAITING_APPROVAL`, `RESOLVED` or `ESCALATED`, because the second run was observed overriding a human-approval requirement with an auto-recommendation |
 | Unparseable message / unknown ticket id | Dead-lettered immediately — no retry will ever fix it |
 | n8n webhook down | Logged, recorded as `notified: false`, ticket still awaits approval — a notification failure must not lose the ticket |
 
