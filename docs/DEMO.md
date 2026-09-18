@@ -130,20 +130,54 @@ a reason to retry, not something to shrug at.
 
 ---
 
-## Screens worth adding yourself
+## 5. The queues
 
-Two need a login this project deliberately doesn't hold:
+No screenshot needed, and the command-line view is better than the web one
+because it shows the routing arguments the management UI hides:
 
-**RabbitMQ — http://localhost:15672** (credentials in your `.env`) → *Queues*.
-Three queues: `ticket.processing` (the work), `ticket.retry` (a delay queue —
-messages sit here on a TTL and RabbitMQ drops them back automatically), and
-`ticket.dead-letter` (terminal, nothing consumes it by design, which is the
-point of a DLQ). Screenshot the Queues tab as `media/05-rabbitmq-queues.png`.
+```
+$ docker compose exec rabbitmq rabbitmqctl list_queues name messages consumers arguments
 
-**n8n — http://localhost:5679** → *Ticket approval* workflow, and its
-*Executions* tab. Screenshot as `media/06-n8n-workflow.png`.
+name                 messages  consumers  arguments
+ticket.dead-letter   15        0          []
+ticket.retry         0         0          [{"x-dead-letter-exchange",[]},
+                                           {"x-dead-letter-routing-key","ticket.processing"}]
+ticket.processing    0         1          []
+```
 
-**Talking point for n8n — "why n8n and not just more Python?"**
+**Point at, in this order:**
+
+- **`ticket.processing`, 1 consumer.** That's the worker. One process, doing
+  the work, separate from the API.
+- **`ticket.retry` carries a dead-letter exchange back to `ticket.processing`.**
+  This is the whole retry mechanism and there is no retry code anywhere. A
+  failed message is published here with a TTL; when the TTL expires RabbitMQ
+  dead-letters it, and the routing key sends it straight back to the work
+  queue. The broker does the waiting.
+- **`ticket.dead-letter`, 15 messages, 0 consumers.** Nothing consumes it and
+  nothing is meant to. A message that arrives here is one no retry could ever
+  fix — an unparseable body, or a ticket id that doesn't exist. Most of these
+  are from test runs that share this broker (see the known limitation in the
+  README), which is the DLQ doing its job for an unrecognised reference.
+
+**Talking point — "what happens when the model is down?"**
+Nothing is lost and nothing spins. The message goes to `ticket.retry`, sits
+there for its TTL, and comes back on its own. After three attempts it stops
+being retried and lands somewhere a person can look at it. The queue topology
+*is* the retry policy — worth saying, because the instinct is to write a
+`while` loop with `sleep` in it.
+
+## A screen worth adding yourself
+
+**n8n — http://localhost:5679** → the *SLA chaser* workflow, **Executions**
+tab. Open a completed run and screenshot it as `media/06-n8n-workflow.png`.
+
+Worth capturing that one specifically rather than the editor view: an execution
+shows the item counts on each connection (`16 items` into the filter, `6` out)
+and the run counts on each node, so the whole flow is legible without opening
+anything. It needs the n8n account, which is yours and isn't in this repo.
+
+**Talking point — "why n8n and not just more Python?"**
 It only ever receives a webhook from the worker and calls back into the API to
 approve or reject. It never touches Postgres or RabbitMQ. That keeps the
 business rules in one place and n8n as thin glue for the things it is genuinely
