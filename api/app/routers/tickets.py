@@ -3,9 +3,26 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.schemas import CommentCreate, CommentOut, TicketCreate, TicketOut, TicketUpdate
+from app.schemas import (
+    AgentRunOut,
+    ApprovalOut,
+    ApprovalRequest,
+    CommentCreate,
+    CommentOut,
+    TicketCreate,
+    TicketOut,
+    TicketUpdate,
+)
 from shared.db import get_db
-from shared.models import AuditLog, Ticket, TicketComment, TicketStatus
+from shared.models import (
+    AgentRun,
+    Approval,
+    ApprovalDecision,
+    AuditLog,
+    Ticket,
+    TicketComment,
+    TicketStatus,
+)
 from shared.rabbitmq import publish_ticket_created
 
 logger = logging.getLogger("api.tickets")
@@ -85,3 +102,65 @@ def add_comment(ticket_id: int, payload: CommentCreate, db: Session = Depends(ge
     db.commit()
     db.refresh(comment)
     return comment
+
+
+def _decide(
+    ticket_id: int,
+    payload: ApprovalRequest,
+    decision: ApprovalDecision,
+    new_status: TicketStatus,
+    db: Session,
+) -> Approval:
+    ticket = _get_ticket_or_404(ticket_id, db)
+
+    # Only a ticket actually waiting on a human can be decided. Without this,
+    # an approval could silently overwrite a RESOLVED or FAILED ticket.
+    if ticket.status is not TicketStatus.AWAITING_APPROVAL:
+        raise HTTPException(
+            status_code=409,
+            detail=f"ticket is {ticket.status.value}, not {TicketStatus.AWAITING_APPROVAL.value}",
+        )
+
+    approval = Approval(
+        ticket_id=ticket_id,
+        decision=decision,
+        decided_by_id=payload.decided_by_id,
+        reason=payload.reason,
+    )
+    db.add(approval)
+    ticket.status = new_status
+    db.add(
+        AuditLog(
+            ticket_id=ticket_id,
+            event_type=f"human_{decision.value.lower()}",
+            detail={"decided_by_id": payload.decided_by_id, "reason": payload.reason},
+        )
+    )
+    db.commit()
+    db.refresh(approval)
+    return approval
+
+
+@router.post("/{ticket_id}/approve", response_model=ApprovalOut, status_code=201)
+def approve_ticket(
+    ticket_id: int, payload: ApprovalRequest, db: Session = Depends(get_db)
+) -> Approval:
+    return _decide(ticket_id, payload, ApprovalDecision.APPROVED, TicketStatus.RESOLVED, db)
+
+
+@router.post("/{ticket_id}/reject", response_model=ApprovalOut, status_code=201)
+def reject_ticket(
+    ticket_id: int, payload: ApprovalRequest, db: Session = Depends(get_db)
+) -> Approval:
+    # Rejection escalates rather than closing: a human disagreeing with the AI
+    # means the ticket still needs solving, by someone else.
+    return _decide(ticket_id, payload, ApprovalDecision.REJECTED, TicketStatus.ESCALATED, db)
+
+
+@router.get("/{ticket_id}/analysis", response_model=list[AgentRunOut])
+def get_ticket_analysis(ticket_id: int, db: Session = Depends(get_db)) -> list[AgentRun]:
+    """What the AI actually did for this ticket, newest first."""
+    _get_ticket_or_404(ticket_id, db)
+    return list(
+        db.query(AgentRun).filter_by(ticket_id=ticket_id).order_by(AgentRun.created_at.desc()).all()
+    )

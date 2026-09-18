@@ -1,0 +1,95 @@
+{
+  "name": "Ticket approval",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ticket-approval",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-approval",
+      "name": "Approval needed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-200, 0],
+      "webhookId": "ticket-approval"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body.priority }}",
+              "rightValue": "CRITICAL",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "branch-priority",
+      "name": "Is it CRITICAL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [40, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "message",
+              "value": "=🚨 CRITICAL ticket #{{ $json.body.ticket_id }} needs approval NOW: {{ $json.body.subject }} — {{ $json.body.reason }}",
+              "type": "string"
+            },
+            { "id": "a2", "name": "route", "value": "page-oncall", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "escalate",
+      "name": "Page on-call",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [280, -120]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "message",
+              "value": "=Ticket #{{ $json.body.ticket_id }} awaiting approval ({{ $json.body.priority }}, confidence {{ $json.body.confidence }}): {{ $json.body.subject }} — {{ $json.body.reason }}",
+              "type": "string"
+            },
+            { "id": "b2", "name": "route", "value": "queue-for-review", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "normal",
+      "name": "Queue for review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [280, 120]
+    }
+  ],
+  "connections": {
+    "Approval needed": {
+      "main": [[{ "node": "Is it CRITICAL?", "type": "main", "index": 0 }]]
+    },
+    "Is it CRITICAL?": {
+      "main": [
+        [{ "node": "Page on-call", "type": "main", "index": 0 }],
+        [{ "node": "Queue for review", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

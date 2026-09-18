@@ -10,6 +10,14 @@ engine at the real test database for the whole test session, let writes
 actually commit, and rely on unique test data per test instead of rollback.
 """
 
+import os
+
+# Set before any shared.* import: shared.config reads the environment at import
+# time, and orchestrator binds RETRIEVAL_MODE by value. Orchestration tests
+# exercise everything downstream of retrieval and shouldn't need a running MCP
+# server to do it.
+os.environ.setdefault("RETRIEVAL_MODE", "direct")
+
 import pytest
 from sqlalchemy.orm import sessionmaker
 
