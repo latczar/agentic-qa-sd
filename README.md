@@ -16,32 +16,39 @@ by a local model against retrieved knowledge, gated on confidence and risk, and
 either auto-recommended or routed to a human for approval. See
 [Architecture](#architecture) for the design and [Phases](#phases) for what's built.
 
-## Architecture (target — built incrementally)
+## Architecture
 
 ```
 User
+  │  POST /tickets
+  ▼
+FastAPI ─────────► PostgreSQL          tickets, users, services, comments,
+  │                                    knowledge_articles + embeddings,
+  │  publish (after commit)            agent_runs, approvals, audit_logs,
+  ▼                                    processed_events
+RabbitMQ   ticket.processing ──► ticket.retry (TTL) ──► back to processing
+  │                          └──► ticket.dead-letter (terminal)
+  ▼
+Worker (trusted code — writes its own bookkeeping straight to Postgres)
   │
-  ▼
-FastAPI  ──────────────► PostgreSQL (tickets, users, services, comments,
-  │                        knowledge_articles+embeddings, agent_runs,
-  │ publish event           approvals, audit_logs, processed_events)
-  ▼
-RabbitMQ (ticket.processing → ticket.retry → ticket.dead-letter)
-  │
-  ▼
-Worker (AI orchestrator — trusted code, direct DB access for its own bookkeeping)
-  ├── deterministic retrieval via MCP client ──► MCP Server ──► Postgres
-  │                                                (read-mostly, controlled tools only)
-  ├── pgvector similarity search (bounded context, never the whole knowledge base)
-  ├── Ollama (generation + embeddings)
-  ├── Pydantic validation (reject/retry on malformed JSON)
-  └── confidence/risk rules ──► AWAITING_APPROVAL or auto-recommend
+  ├─ 1. retrieve ──► MCP Server ──► pgvector similarity search
+  │                  (the only DB surface the model ever sees)
+  ├─ 2. build a bounded prompt — retrieved articles only, never the whole KB,
+  │                              plus the real service names
+  ├─ 3. Ollama (qwen2.5:7b-instruct) ──► structured JSON
+  ├─ 4. Pydantic validation ──► invalid? retry with the error fed back (max 3)
+  └─ 5. confidence / sensitivity gate  ← plain if/else, not the model's call
         │
-        ▼
-      n8n (notifications, approval webhook, escalation) ──► FastAPI approve/reject
-        │
-        ▼
-      Ticket updated → Audit log
+        ├─ passes ──────────────► RESOLVED
+        └─ needs a human ───────► AWAITING_APPROVAL
+                                    │
+                                    ├─ webhook ──► n8n ──► notify / branch on priority
+                                    ▼
+                          POST /approve ──► RESOLVED
+                          POST /reject  ──► ESCALATED
+                                    │
+                                    ▼
+                              Audit log (every step above)
 ```
 
 **Design decisions worth knowing:**
@@ -160,8 +167,12 @@ Worker (AI orchestrator — trusted code, direct DB access for its own bookkeepi
    decided in Python; the model only supplies the judgement in the middle.
 9. **Human approval + n8n** ← you are here — `/approve` and `/reject`, plus a
    webhook to n8n that branches on priority.
-10. Failure handling / retries / DLQ
-11. Evaluation suite
+10. **Failure handling / retries / DLQ** — queue-level retry, backoff and
+    dead-lettering landed in Phase 3; Phase 6-8 added the AI-specific cases
+    (model unreachable, invalid JSON, no evidence, low confidence).
+11. **Evaluation suite** — 40 cases in `eval/dataset.json`, scored on
+    retrieval hit rate, Recall@1, category accuracy, escalation correctness and
+    unsupported-citation rate. See [Evaluation](#evaluation).
 12. Documentation and demo
 
 ## Local setup
@@ -261,6 +272,46 @@ created by a migration rather than declared on the model. Retrieval results are
 identical either way (an index changes how Postgres finds rows, not which rows match),
 so the tests stay honest — but they are not measuring index behaviour, and aren't
 meant to.
+
+## Evaluation
+
+"The agent seems better now" is not a measurement. `eval/` runs 40 cases —
+32 with a known correct knowledge article, 8 deliberately outside the knowledge
+base where the right answer is "I don't have evidence for this".
+
+```bash
+python eval/run_eval.py --retrieval-only     # seconds: is retrieval finding the right article?
+python eval/run_eval.py --out eval/results.md # ~10 min: the whole pipeline, real model
+```
+
+What it measures and why:
+
+| Metric | What a bad number would mean |
+| --- | --- |
+| Retrieval hit rate | The right article exists but never reaches the model — no amount of prompt work fixes that |
+| Recall@1 | The right article is retrieved but ranked below noise, crowding the context |
+| Correct rejection (negatives) | The threshold is too loose and off-topic questions get plausible-looking answers |
+| Structured output success | The model can't reliably produce the schema, and retries are papering over it |
+| Category accuracy | Classification is wrong even when the evidence was right |
+| Escalation correctness | The gate is letting through things a human should see, or crying wolf |
+| Unsupported-citation rate | The model cited a document it was never shown — invented evidence, the worst failure mode here |
+
+The retrieval-only mode exits non-zero below an 80% hit rate, so it can gate a
+change rather than being a document nobody reads.
+
+## Failure handling
+
+| Failure | Behaviour |
+| --- | --- |
+| Ollama unreachable | Retryable — queue retry with exponential backoff, dead-letter after 3 attempts |
+| Invalid LLM JSON | Rejected and retried with the validation error fed back into the prompt, up to 3 attempts |
+| Output missing/extra schema fields | Same — `extra="forbid"` means drift fails validation rather than passing silently |
+| No relevant knowledge found | Not an error: the model is told plainly it has no evidence, and the gate routes to a human |
+| Retrieval itself fails (can't embed) | Distinct from "found nothing" — retryable, and recorded as a failed agent run |
+| MCP server unreachable | Retryable, same path as a model failure |
+| Duplicate queue message | Skipped via `processed_events`, keyed on the publisher's `event_id` |
+| Unparseable message / unknown ticket id | Dead-lettered immediately — no retry will ever fix it |
+| n8n webhook down | Logged, recorded as `notified: false`, ticket still awaits approval — a notification failure must not lose the ticket |
 
 ## Testing
 
