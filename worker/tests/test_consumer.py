@@ -35,7 +35,13 @@ def test_happy_path_acks_and_records_processed_event(db_session):
     payload = _payload(ticket.id)
     channel = MagicMock()
 
-    on_message(channel, _method(), None, json.dumps(payload).encode())
+    # An explicit stand-in for the work itself: this test is about queue
+    # plumbing (ack, idempotency record), not about the AI pipeline that the
+    # real process_ticket now runs. Orchestration has its own tests.
+    def mark_processing(db, t):
+        t.status = TicketStatus.PROCESSING
+
+    on_message(channel, _method(), None, json.dumps(payload).encode(), process_fn=mark_processing)
 
     channel.basic_ack.assert_called_once_with(1)
     channel.basic_publish.assert_not_called()

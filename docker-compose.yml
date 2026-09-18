@@ -50,6 +50,7 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/ticket-approval}
     ports:
       - "8000:8000"
     depends_on:
@@ -64,6 +65,28 @@ services:
       - ./shared:/app/shared
       - ./knowledge:/app/knowledge
 
+  mcp-server:
+    build:
+      context: .
+      dockerfile: mcp_server/Dockerfile
+    container_name: sd-mcp-server
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./mcp_server:/app/mcp_server
+      - ./shared:/app/shared
+
   worker:
     build:
       context: .
@@ -76,17 +99,45 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+      GENERATION_MODEL: ${GENERATION_MODEL:-qwen2.5:7b-instruct}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      MCP_SERVER_URL: ${MCP_SERVER_URL:-http://mcp-server:8080/mcp}
+      RETRIEVAL_MODE: ${RETRIEVAL_MODE:-mcp}
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      mcp-server:
+        condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./worker:/app/worker
       - ./shared:/app/shared
 
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: sd-n8n
+    restart: unless-stopped
+    environment:
+      # Local demo only - no auth, no encryption key management, no HTTPS.
+      # Fine on a laptop, not something to copy into anything real.
+      N8N_SECURE_COOKIE: "false"
+      N8N_RUNNERS_ENABLED: "true"
+      GENERIC_TIMEZONE: Europe/London
+      # n8n calls back into the API over the Compose network.
+      API_BASE_URL: http://api:8000
+    ports:
+      # 5679 on the host, not 5678: the sibling ai-auto project runs its own
+      # n8n on 5678, same reasoning as Postgres on 5433. Inside Compose it is
+      # still the normal 5678.
+      - "${N8N_HOST_PORT:-5679}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows
+
 volumes:
   postgres_data:
   rabbitmq_data:
+  n8n_data:

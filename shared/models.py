@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -126,6 +126,64 @@ class ProcessedEvent(Base):
     event_id: Mapped[str] = mapped_column(String(36), unique=True)
     ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentRunStatus(str, enum.Enum):
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
+class ApprovalDecision(str, enum.Enum):
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class AgentRun(Base):
+    """One row per AI orchestration attempt, successful or not.
+
+    This is the engineering/debugging record - what was retrieved, what the
+    model said, how long it took, how many attempts it needed. Distinct from
+    audit_logs, which is the human-readable lifecycle trail. Different
+    consumers, different shapes: this one feeds the Phase 11 evaluation suite.
+
+    No chain-of-thought is stored, only operational metadata and the final
+    structured output.
+    """
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"))
+    status: Mapped[AgentRunStatus] = mapped_column(SAEnum(AgentRunStatus, name="agent_run_status"))
+    model: Mapped[str] = mapped_column(String(120))
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    latency_ms: Mapped[int] = mapped_column(Integer)
+    # Slugs of the knowledge articles put in front of the model, so a bad
+    # answer can be traced back to what it was actually given.
+    retrieved_slugs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Approval(Base):
+    """A human's decision on an AI recommendation.
+
+    Kept separate from ticket.status: status is the ticket's current state,
+    this is the permanent record of who decided what and why.
+    """
+
+    __tablename__ = "approvals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"))
+    decision: Mapped[ApprovalDecision] = mapped_column(
+        SAEnum(ApprovalDecision, name="approval_decision")
+    )
+    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class KnowledgeArticle(Base):
