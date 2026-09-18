@@ -301,6 +301,43 @@ identical either way (an index changes how Postgres finds rows, not which rows m
 so the tests stay honest — but they are not measuring index behaviour, and aren't
 meant to.
 
+
+## The n8n workflows
+
+Three, in `n8n/workflows/`, version-controlled as JSON and imported with the
+CLI rather than clicked together and left in a volume nobody can review.
+
+**Ticket approval** — webhook → branch on priority → HTTP call back into the
+API. The worker POSTs here when the gate decides a ticket needs a human; the
+workflow posts a comment on the ticket saying why it is waiting and what was
+proposed. CRITICAL tickets take the on-call branch, everything else queues for
+review.
+
+**SLA chaser** — schedule trigger every 15 minutes → fetch all tickets → a Code
+node filters to anything sitting in `AWAITING_APPROVAL` for over 30 minutes →
+loop in batches of 5 → comment on each one with how long it has been waiting.
+There is no "stale tickets" endpoint on the API on purpose: how long is too
+long is a policy question, and policy that changes often is better expressed
+here than baked into the backend. It also has an on-demand entry point, so it
+can be run by hand or called as a sub-workflow rather than only on its timer.
+
+**Error handler** — set as the `errorWorkflow` on both of the above, so a
+failure lands somewhere deliberate instead of disappearing into an execution
+list nobody reads. It does not retry: these workflows are notification glue,
+and a failed notification must never be mistaken for a failed ticket. The
+ticket is safe in Postgres either way.
+
+```bash
+docker compose exec n8n n8n import:workflow --input=/workflows/ticket-approval.json
+docker compose exec n8n n8n update:workflow --id=ticketapproval001 --active=true
+docker compose restart n8n   # activation only takes effect on restart
+```
+
+The boundary is the thing worth defending: n8n receives webhooks from the worker
+and calls back in over HTTP. It never touches Postgres or RabbitMQ. Business
+rules stay in one place, and n8n does what it is genuinely good at — waiting on
+people, branching, and running things on a timer.
+
 ## Evaluation
 
 "The agent seems better now" is not a measurement. `eval/` runs 40 cases —

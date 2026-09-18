@@ -1,0 +1,178 @@
+{
+  "id": "slachaser001",
+  "active": false,
+  "name": "SLA chaser",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "schedule",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "manual-entry",
+      "name": "Or run it on demand",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://api:8000/tickets",
+        "options": {}
+      },
+      "id": "fetch-tickets",
+      "name": "Fetch tickets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Anything sitting unreviewed for too long. The API has no \"stale\"\n// endpoint on purpose - this is a policy question, and policy that changes\n// often is better expressed here than baked into the backend.\nconst MAX_WAIT_MINUTES = 30;\nconst cutoff = Date.now() - MAX_WAIT_MINUTES * 60 * 1000;\n\nconst stale = [];\nfor (const item of $input.all()) {\n  const t = item.json;\n  if (t.status !== 'AWAITING_APPROVAL') continue;\n  const waitingSince = Date.parse(t.updated_at);\n  if (waitingSince > cutoff) continue;\n\n  stale.push({\n    json: {\n      ticket_id: t.id,\n      subject: t.subject,\n      priority: t.priority,\n      waiting_minutes: Math.round((Date.now() - waitingSince) / 60000),\n    },\n  });\n}\n\n// Returning an empty array stops the branch here - downstream nodes simply\n// do not run, so there is no \"if anything found\" node to write.\nreturn stale;"
+      },
+      "id": "find-stale",
+      "name": "Find stale approvals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "loop",
+      "name": "Loop in batches of 5",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api:8000/tickets/{{ $json.ticket_id }}/comments",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "body",
+              "value": "=\u23f0 Still awaiting approval after {{ $json.waiting_minutes }} minutes ({{ $json.priority }}). Chased automatically by the SLA workflow."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "chase",
+      "name": "Chase on the ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Fetch tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch tickets": {
+      "main": [
+        [
+          {
+            "node": "Find stale approvals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find stale approvals": {
+      "main": [
+        [
+          {
+            "node": "Loop in batches of 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop in batches of 5": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Chase on the ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chase on the ticket": {
+      "main": [
+        [
+          {
+            "node": "Loop in batches of 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Or run it on demand": {
+      "main": [
+        [
+          {
+            "node": "Fetch tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "errorhandler001"
+  },
+  "pinData": {}
+}

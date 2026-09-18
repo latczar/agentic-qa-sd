@@ -1,0 +1,32 @@
+{
+  "id": "errorhandler001",
+  "active": false,
+  "name": "Error handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "When a workflow fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [-300, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Set as the errorWorkflow on the other workflows, so a failure anywhere\n// lands here instead of disappearing into an execution list nobody reads.\n//\n// Deliberately does not retry: these workflows are notification glue, and a\n// failed notification must never be mistaken for a failed ticket. The ticket\n// is safe in Postgres either way - the worker records notified=false and the\n// ticket stays AWAITING_APPROVAL regardless of whether n8n ever heard about\n// it.\nconst e = $input.first().json;\n\nreturn [{\n  json: {\n    failed_workflow: e.workflow?.name ?? 'unknown',\n    failed_node: e.execution?.lastNodeExecuted ?? 'unknown',\n    message: e.execution?.error?.message ?? 'no message',\n    execution_url: e.execution?.url ?? null,\n    at: new Date().toISOString(),\n    // Where a real deployment would send this: Slack, PagerDuty, email.\n    // Left as structured output so the routing is a one-node change.\n    severity: e.workflow?.name === 'Ticket approval' ? 'high' : 'low',\n  },\n}];"
+      },
+      "id": "format-failure",
+      "name": "Describe the failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-60, 0]
+    }
+  ],
+  "connections": {
+    "When a workflow fails": {
+      "main": [[{ "node": "Describe the failure", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
