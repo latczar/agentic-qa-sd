@@ -1,4 +1,6 @@
-from shared.models import User, UserRole
+from unittest.mock import patch
+
+from shared.models import Ticket, TicketStatus, User, UserRole
 
 
 def _make_user(db_session, email: str = "test.user@example.com") -> User:
@@ -87,3 +89,34 @@ def test_add_comment(client, db_session):
 def test_add_comment_ticket_not_found(client):
     response = client.post("/tickets/999999/comments", json={"body": "..."})
     assert response.status_code == 404
+
+
+def test_a_worker_that_finishes_first_is_not_overwritten_by_the_queued_update(client, db_session):
+    """Regression: the API used to stomp a completed analysis back to QUEUED.
+
+    Between publishing and its own second commit, the API had a window in which
+    a fast worker could consume the message, analyse the ticket and write
+    AWAITING_APPROVAL - which the API then overwrote with an unconditional
+    "status = QUEUED". The message was already acked, so nothing would ever
+    redeliver it and the ticket was stuck forever. Observed for real on a slow
+    request, not hypothetical.
+    """
+    user = _make_user(db_session, "race@example.com")
+
+    def publish_and_let_a_worker_win(ticket_id: int) -> str:
+        # Stand in for a worker that consumes and completes during the window.
+        db_session.query(Ticket).filter(Ticket.id == ticket_id).update(
+            {Ticket.status: TicketStatus.AWAITING_APPROVAL}, synchronize_session=False
+        )
+        db_session.commit()
+        return "event-id-from-a-fast-worker"
+
+    with patch("app.routers.tickets.publish_ticket_created", publish_and_let_a_worker_win):
+        response = client.post(
+            "/tickets",
+            json={"submitted_by_id": user.id, "subject": "Race", "description": "..."},
+        )
+
+    assert response.status_code == 201
+    # The compare-and-set only advances NEW -> QUEUED, so the worker's result stands.
+    assert response.json()["status"] == "AWAITING_APPROVAL"

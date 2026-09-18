@@ -56,7 +56,15 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)) -> Ticke
     # for this yet, which is a known limitation (see README).
     try:
         event_id = publish_ticket_created(ticket.id)
-        ticket.status = TicketStatus.QUEUED
+        # Compare-and-set, not a plain assignment. Between the publish above and
+        # this commit, a worker can consume the message, run the whole analysis
+        # and write its own status. An unconditional "status = QUEUED" would
+        # then overwrite that result and strand the ticket forever, because the
+        # message has already been acked and nothing will redeliver it. Only
+        # advance NEW -> QUEUED; if something already moved it on, leave it be.
+        db.query(Ticket).filter(
+            Ticket.id == ticket.id, Ticket.status == TicketStatus.NEW
+        ).update({Ticket.status: TicketStatus.QUEUED}, synchronize_session=False)
         db.add(AuditLog(ticket_id=ticket.id, event_type="ticket_queued", detail={"event_id": event_id}))
     except Exception as exc:
         logger.error("failed to publish ticket_created for ticket %s: %s", ticket.id, exc)
