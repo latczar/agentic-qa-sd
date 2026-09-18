@@ -50,7 +50,6 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
-      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/ticket-approval}
     ports:
       - "8000:8000"
     depends_on:
@@ -103,6 +102,9 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       MCP_SERVER_URL: ${MCP_SERVER_URL:-http://mcp-server:8080/mcp}
       RETRIEVAL_MODE: ${RETRIEVAL_MODE:-mcp}
+      # The worker fires this when the gate routes a ticket to a human - it is
+      # the worker, not the API, that makes that decision.
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/ticket-approval}
     depends_on:
       postgres:
         condition: service_healthy
