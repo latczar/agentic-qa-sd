@@ -563,7 +563,7 @@ Do not bluff these. Volunteering a gap with a plan beats being caught.
 | **No Make or Zapier** | "n8n only. Same primitives — webhooks, HTTP calls, branching, error handling — so I'd expect a short ramp." Don't pad it. |
 | **No voice AI / telephony** | Listed as preferred, not required. "Not yet" is a fine answer. |
 | **No QuickBooks / CRM / Google Workspace** | Same. But note you've done the general shape: calling an external API, handling its JSON, retrying its failures. |
-| **No cloud deployment** — it's local Docker Compose | The real gap. "It runs as containers on Docker Compose, so the move to a hosted environment is mostly configuration, but I haven't done it on this project. What I have done is the part that usually breaks in production: retries, dead-lettering, idempotency and health checks." |
+| **This project isn't deployed** — it's local Docker Compose | Not a gap any more, as long as you bring up the other project. "This one runs as containers locally. I've got another that's deployed and live on Vercel — see below." Then explain why the two are hosted differently, which is a better answer than either on its own. |
 | **No "hours saved" number** | The important one — see below. |
 
 ### On business results
@@ -668,3 +668,64 @@ employer isn't asking:
 
 Lead instead with: **it reads, decides, acts, escalates, and it doesn't fall
 over — and I can prove the last part.**
+
+---
+
+## The deployed one — AI Automation Architect
+
+`ai-auto-arch`, live at **https://ai-auto-architect.vercel.app**, no sign-up, no
+API key.
+
+For *this* advert it may be the stronger opener, because the JD asks for someone
+who can *"analyse manual business processes and identify automation
+opportunities"* — and that is literally what the app does. You describe
+repetitive work in plain English; it maps the steps, judges which a computer
+could take over, flags where a human has to stay in the loop and why, and exports
+an n8n scaffold.
+
+It's also the thing to put in the application email, because they ask for
+*"links to GitHub, demos, portfolios, or videos"* and this is a live URL a hiring
+manager can click without installing anything.
+
+### What's actually deployed, in plain terms
+
+| Piece | What it means |
+|---|---|
+| **Vercel** | Hosting. Push to GitHub, it builds and publishes with a URL and HTTPS. No server to maintain — this is CI/CD that ends in something live |
+| **Serverless function** | `vercel.json` declares `index.py` with `maxDuration: 60`. The FastAPI backend doesn't run continuously — a request arrives, it starts, answers, and stops. 60 seconds is the ceiling per request, which matters because model calls are slow |
+| **Blob storage** | A place for files that survives. Needed **because** a serverless function has no disk that outlives a request — anything written locally would vanish |
+| **Static frontend** | Built with npm at deploy time and served as files |
+
+### The line to say
+
+> Locally it stores shared analyses in SQLite, because that's the boring answer
+> on a machine with a disk. Hosted on Vercel there is no disk that survives a
+> request, so the same interface is backed by blob storage instead, and a config
+> check picks which one. Storage is a deployment decision, not an application
+> one — same pattern I used in front of the model provider in the other project.
+
+**One interface, two implementations, configuration chooses.** You did it for
+storage in one project and for the model provider in the other. Pointing out that
+it's the same idea twice is worth more than naming either product.
+
+### Why the service desk is NOT on Vercel — a genuinely good answer
+
+Expect: *"why is one deployed and not the other?"* This is the answer, and it
+shows you understand the tool rather than just having used it:
+
+> Serverless is the wrong shape for it. A Vercel function wakes up for a request
+> and stops; the service desk's worker is a process that sits watching a queue
+> all day, which is the opposite. RabbitMQ needs a broker that's always running,
+> and the local model needs a GPU. So hosting it means a managed Postgres with
+> pgvector, a hosted broker, and the model behind an API instead of on the
+> machine — the application code barely changes, because those are all already
+> behind interfaces. That's the work, and I haven't done it yet.
+
+That answer gets you more credit than having deployed it would, because it's the
+difference between *"I used Vercel"* and *"I know what Vercel is for."*
+
+### What you can now say yes to
+
+The advert lists *"AWS, Firebase, Supabase, or similar platforms."* Vercel is
+similar, and you have: a live deployment, GitHub-triggered builds, environment
+variables and secrets, managed storage, and a real reason for each choice.
