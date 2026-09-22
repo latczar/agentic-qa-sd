@@ -490,3 +490,181 @@ Webhook -> validate -> IF gate flagged -> notify -> wait for human -> HTTP back 
 2. **The queue topology *is* the retry policy** — there's no retry code anywhere.
 3. **Every number I quote belongs to this model.** Swap the model and the
    architecture survives, but the measurements have to be earned again.
+
+---
+---
+
+# Part 3 — Aligning to the role
+
+*AI Automation & Agent Implementation Specialist — Medstar Transportation
+(transport/dispatch operations, Metro Manila, remote).*
+
+## Read the room first
+
+The advert closes with three lines that tell you exactly how to pitch:
+
+> Working automation > impressive demos.
+> Business results > technical complexity.
+> Reliability > novelty.
+
+And: *"We are not looking for someone who simply knows how to use ChatGPT."*
+
+So **do not lead with Part 2**. Nobody here will ask about confidence
+quantisation or cosine thresholds. They want to know whether you can take a
+manual process, build something that works, and keep it working.
+
+Success is measured in their words as: hours of manual work eliminated,
+processes automated, less repetitive data entry, faster customer response,
+better billing accuracy, **reliability of deployed systems**.
+
+## The headline sentence
+
+Their own advert describes what they want built:
+
+> *"Create workflows that can read information, make decisions, take actions,
+> and escalate exceptions to employees."*
+
+That is a one-line description of what you built. Say it back to them:
+
+> I built a system that reads an incoming request, pulls the relevant internal
+> documentation, decides what should happen, acts on it when it's confident and
+> the action is low-risk, and escalates to a person when it isn't — with the
+> decision and the reason recorded either way. The interesting part was the
+> escalation rule, because that's what decides whether a person's time gets
+> spent.
+
+## Direct hits — JD line to your evidence
+
+| What they ask for | What you point at |
+|---|---|
+| "n8n, Make, Zapier or similar" | Three n8n workflows, version-controlled as JSON, importable from the CLI — not clicked together and lost |
+| "REST APIs, webhooks, and JSON" | FastAPI endpoints, a webhook from the worker into n8n, n8n calling back into the API, structured JSON contracts throughout |
+| "Python and/or JavaScript" | Python service, JS in the n8n Code nodes |
+| "SQL and databases" | Postgres schema, Alembic migrations, a joined read behind the approvals list |
+| "GitHub" | Public repo with CI running the full suite against a real Postgres |
+| "read information, make decisions, take actions, escalate exceptions" | The whole design |
+| "Monitor deployed systems and continuously improve accuracy and reliability" | The 40-case evaluation suite — it found three real bugs and took escalation correctness from 54% to 87.5% |
+| "Test and troubleshoot before and after deployment" | 109 tests, plus an n8n `errorWorkflow` that catches failures in the other workflows |
+| "Faster customer response times" | The SLA chaser: finds requests waiting on a human, chases at 30/60/120/240/480 minutes, highest priority first, then stops nagging |
+| "Reliability" | Retries via a TTL queue, a dead-letter queue for what can't be retried, and idempotency so a duplicate message doesn't double-act |
+
+**The single best thing you have for this role is the evaluation suite.** Most
+applicants will say their automation works. You measured yours, found it didn't,
+fixed it, and measured again. That is literally their line: *"continuously
+improve accuracy and reliability."*
+
+## The honest gaps, and what to say
+
+Do not bluff these. Volunteering a gap with a plan beats being caught.
+
+| Gap | What to say |
+|---|---|
+| **No OpenAI/Claude/Gemini API** — you ran a local model | "I used a local model deliberately, so it cost nothing to run and no data left the machine. The model sits behind a provider interface, so moving to a hosted API is one new class and a config value — the queue, the decision rules and the audit log don't change. What does change is that every accuracy number belongs to the old model, so I'd re-run the evaluation set and re-tune the escalation threshold before trusting it." |
+| **No Make or Zapier** | "n8n only. Same primitives — webhooks, HTTP calls, branching, error handling — so I'd expect a short ramp." Don't pad it. |
+| **No voice AI / telephony** | Listed as preferred, not required. "Not yet" is a fine answer. |
+| **No QuickBooks / CRM / Google Workspace** | Same. But note you've done the general shape: calling an external API, handling its JSON, retrying its failures. |
+| **No cloud deployment** — it's local Docker Compose | The real gap. "It runs as containers on Docker Compose, so the move to a hosted environment is mostly configuration, but I haven't done it on this project. What I have done is the part that usually breaks in production: retries, dead-lettering, idempotency and health checks." |
+| **No "hours saved" number** | The important one — see below. |
+
+### On business results
+
+They will ask what it saved. Be straight:
+
+> This one was built as a working reference rather than deployed into a business,
+> so I can't quote hours saved — the tickets are synthetic. What I can quote is
+> the reliability work, because that's the part I actually measured: retrieval
+> finds the right document 96.9% of the time, the model's output is valid and
+> usable 100% of the time within the retry limit, and it never cites a document
+> it wasn't given. If I were doing this on your dispatch process, the number I'd
+> want on day one is what proportion of exceptions get handled without a person
+> touching them, and how many of those were handled correctly — because the
+> second number is the one that stops you trusting the first.
+
+That last sentence is the whole interview. They said *"business results, not AI
+hype"*, and the honest version of a business result is a measurement, not a
+claim.
+
+## Translate it into their world
+
+Your project is an IT service desk. Theirs is transport, dispatch and billing.
+The shape is identical and you should do the translation for them, out loud.
+
+| Yours | Theirs |
+|---|---|
+| A ticket arrives | A trip exception, a driver message, a customer request, an unpaid invoice |
+| Search the knowledge articles | Search the SOPs, the dispatch rules, prior cases |
+| Propose a resolution | Propose a reassignment, a reply, a billing correction |
+| Sensitive subject -> person | Anything touching payment, a medical booking, or a cancellation -> person |
+| Destructive action -> person | Anything that cancels a trip or changes a charge -> person |
+| Weak evidence -> person | Same |
+| Otherwise, act and log it | Same |
+| SLA chaser | Nobody actioned the exception in 30 minutes — chase, then chase less often |
+
+Then the point that matters to an operations manager:
+
+> The rule about what gets escalated is plain code, not a prompt. That matters
+> because when the business changes its mind about what's safe to automate, you
+> change one list — you don't retrain or re-prompt anything, and you can show an
+> auditor exactly why any given decision went the way it did.
+
+## Have two or three ideas ready for *their* business
+
+They will ask what you'd automate. Don't improvise. Pick from their own list —
+dispatch, trip monitoring, driver communication, billing and AR, recruiting —
+and describe one properly using the ten-beat spine. Something like:
+
+> **Unbilled or mis-billed trips.** Read completed trips, compare each against
+> the rate rules, and flag the ones that don't reconcile. Anything clear-cut and
+> low-value gets corrected automatically and logged; anything above a threshold,
+> or where the rule is ambiguous, goes to a person with the reason attached. It's
+> the same pattern as my escalation gate — the decision about what's safe to do
+> automatically is a rule, and the model's job is only the reading and the
+> drafting.
+
+The move to make, whatever you pick: **say what you would NOT automate, and why.**
+That is the difference between someone who's used ChatGPT and someone who's
+deployed something.
+
+## The application email asks for specifics
+
+It wants *"2–3 AI automations or agents you personally built, including your
+specific role"*. Have them written before you apply:
+
+1. **This project** — the read/decide/act/escalate agent. Your role: all of it.
+2. **The n8n layer specifically** — approval routing, the backing-off SLA chaser,
+   the error handler. Worth listing separately because it's the platform they
+   named.
+3. **The test-generation project** — the other one, described in the same shape.
+
+Include the GitHub link. They explicitly ask for links, and a public repo with
+green CI does more than a paragraph.
+
+## The practical assessment
+
+Shortlisted candidates get *"a small, real-world automation exercise"*. Expect
+something like: take a webhook or a spreadsheet, call an API, make a decision,
+write the result somewhere, handle the failure case.
+
+Three things to do in that exercise, whatever it is:
+
+1. **Handle the failure path**, and say you did. Most candidates won't.
+2. **Make the decision rule visible and changeable** rather than buried in a
+   prompt.
+3. **Say how you'd know it was working** after it was deployed.
+
+Those three are exactly what this project already demonstrates, which is why it's
+the right thing to talk about.
+
+## What NOT to lead with
+
+Keep these in your back pocket — they're good, but they answer questions this
+employer isn't asking:
+
+- Prompt injection and the adversarial suite *(bring it out only if they ask
+  about risk, security, or trusting the model — then it's excellent)*
+- pgvector internals, cosine distance, HNSW
+- Confidence quantisation and single-run variance
+- Why not LangChain
+
+Lead instead with: **it reads, decides, acts, escalates, and it doesn't fall
+over — and I can prove the last part.**
