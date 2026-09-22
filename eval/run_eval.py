@@ -178,6 +178,52 @@ def report(results: list[CaseResult], retrieval_only: bool) -> str:
         f"{_percent(sum(r.citations_supported for r in cited_anything), len(cited_anything))}",
         f"- Unsupported-answer rate (cited a document that was never retrieved): "
         f"{_percent(sum(not r.citations_supported for r in cited_anything), len(cited_anything))}",
+    ]
+
+    scored_conf = [r for r in ok if r.confidence is not None]
+    if scored_conf:
+        confidences = [r.confidence for r in scored_conf]
+        at_or_above = [c for c in confidences if c >= rules.CONFIDENCE_THRESHOLD]
+        # The model emits only a handful of distinct values, so the whole
+        # distribution fits on a few lines and is far more use than a mean.
+        buckets: dict[float, int] = {}
+        for c in confidences:
+            buckets[c] = buckets.get(c, 0) + 1
+
+        # An escalation nobody asked for, where confidence is the only thing
+        # that could have caused it, is a shy model rather than a firm gate.
+        shy = [
+            r
+            for r in scored_conf
+            if r.escalated
+            and r.expected_escalation is False
+            and r.confidence < rules.CONFIDENCE_THRESHOLD
+        ]
+
+        lines += [
+            "",
+            "## Confidence",
+            "",
+            f"- Threshold for automatic resolution: {rules.CONFIDENCE_THRESHOLD}",
+            f"- At or above the threshold: "
+            f"{_percent(len(at_or_above), len(confidences))} "
+            f"({len(at_or_above)}/{len(confidences)})",
+            f"- Mean: {statistics.mean(confidences):.3f}   "
+            f"median: {statistics.median(confidences):.2f}",
+            f"- Unwanted escalations explained by confidence alone: "
+            f"{len(shy)}",
+            "",
+            "Distribution (the model emits only these values, which is why a "
+            "swing in escalation correctness is often quantisation rather than "
+            "a regression):",
+            "",
+        ]
+        for value in sorted(buckets):
+            side = ">=" if value >= rules.CONFIDENCE_THRESHOLD else "< "
+            bar = "#" * buckets[value]
+            lines.append(f"- `{value:.2f}` {side} threshold  {buckets[value]:>3}  {bar}")
+
+    lines += [
         "",
         "## Failures worth looking at",
         "",
