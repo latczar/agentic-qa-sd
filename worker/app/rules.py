@@ -121,6 +121,29 @@ class Gate:
     reason: str
 
 
+def screen_ticket_text(ticket_context: str) -> Gate | None:
+    """Catch analyser-directed instructions in the ticket's own words.
+
+    Split out of `evaluate` so it can run BEFORE retrieval and the model call.
+    It needs nothing but the ticket text, and a ticket that trips it goes to a
+    human whatever the model would have said - so running it after inference
+    meant paying for an answer that was always going to be discarded. That
+    waste never showed up locally, where inference is free; on a metered model
+    it is the first thing worth moving.
+
+    `evaluate` still calls this, so a caller that skips the pre-screen is not
+    quietly less safe. Checking twice costs a substring scan.
+    """
+    lowered_ticket = ticket_context.lower()
+    markers = [marker for marker in INJECTION_MARKERS if marker in lowered_ticket]
+    if markers:
+        return Gate(
+            True,
+            f"ticket text contains analyser-directed instructions ({markers[0]!r})",
+        )
+    return None
+
+
 def evaluate(
     analysis: TicketAnalysis,
     ticket_context: str = "",
@@ -141,13 +164,9 @@ def evaluate(
     argument someone has to remember to pass is a hole; one that raises a
     TypeError is not.
     """
-    lowered_ticket = ticket_context.lower()
-    markers = [marker for marker in INJECTION_MARKERS if marker in lowered_ticket]
-    if markers:
-        return Gate(
-            True,
-            f"ticket text contains analyser-directed instructions ({markers[0]!r})",
-        )
+    screened = screen_ticket_text(ticket_context)
+    if screened:
+        return screened
 
     domain_haystack = f"{ticket_context} {analysis.affected_service or ''}".lower()
     sensitive = [word for word in SENSITIVE_DOMAINS if word in domain_haystack]
