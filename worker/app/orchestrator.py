@@ -76,6 +76,42 @@ def _resolve_service_id(db: Session, name: str | None) -> int | None:
     return service.id if service else None
 
 
+def _escalate_unanalysed(db: Session, ticket: Ticket, gate: rules.Gate) -> None:
+    """Park a ticket for a human without having asked the model anything.
+
+    No AgentRun row is written, because no run happened - a row naming a
+    model that was never called would be a lie in the audit trail. The
+    AuditLog entry carries the reason instead.
+    """
+    ticket.status = TicketStatus.AWAITING_APPROVAL
+    db.add(
+        AuditLog(
+            ticket_id=ticket.id,
+            event_type="ticket_screened_before_analysis",
+            detail={"reason": gate.reason, "requires_human_approval": True},
+        )
+    )
+    notified = notify_approval_needed(
+        {
+            "ticket_id": ticket.id,
+            "subject": ticket.subject,
+            "reason": gate.reason,
+            "approve_url": f"/tickets/{ticket.id}/approve",
+            "reject_url": f"/tickets/{ticket.id}/reject",
+        }
+    )
+    # Same event as the post-analysis path: a screened ticket is waiting on a
+    # person for the same reason any other one is, and anything reading the
+    # audit trail should find it without knowing which route it took.
+    db.add(
+        AuditLog(
+            ticket_id=ticket.id,
+            event_type="human_approval_requested",
+            detail={"reason": gate.reason, "notified": notified},
+        )
+    )
+
+
 def _apply(db: Session, ticket: Ticket, analysis: TicketAnalysis, gate: rules.Gate) -> None:
     ticket.category = analysis.category
     ticket.priority = analysis.priority
@@ -90,8 +126,25 @@ def run(
     ticket: Ticket,
     embedding_provider: EmbeddingProvider,
     llm_provider: LLMProvider,
-) -> TicketAnalysis:
+) -> TicketAnalysis | None:
+    """Run the pipeline for one ticket.
+
+    Returns the analysis, or None when the ticket was screened out before
+    the model was ever asked - in that case no analysis exists, and
+    inventing one would misreport what happened.
+    """
     started = time.monotonic()
+    ticket_context = f"{ticket.subject} {ticket.description}"
+
+    # Cheapest check first, and before anything is spent. It needs only the
+    # ticket's own words, and a ticket that trips it goes to a human
+    # whatever the model would have said - so there is nothing to gain by
+    # retrieving and generating first.
+    screened = rules.screen_ticket_text(ticket_context)
+    if screened:
+        _escalate_unanalysed(db, ticket, screened)
+        return None
+
     query = f"{ticket.subject}\n{ticket.description}"
     articles: list[RetrievedArticle] = []
 
@@ -127,7 +180,7 @@ def run(
     # documents it was given.
     gate = rules.evaluate(
         analysis,
-        ticket_context=f"{ticket.subject} {ticket.description}",
+        ticket_context=ticket_context,
         retrieved_slugs=[a.slug for a in articles],
     )
     _apply(db, ticket, analysis, gate)
