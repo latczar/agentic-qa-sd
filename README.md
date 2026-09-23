@@ -48,8 +48,9 @@ Worker (trusted code — writes its own bookkeeping straight to Postgres)
                                     │
                                     ├─ webhook ──► n8n ──► notify / branch on priority
                                     ▼
-                          POST /approve ──► RESOLVED
-                          POST /reject  ──► ESCALATED
+                          POST /approve ──► RESOLVED    (do what the agent said)
+                          POST /handled ──► RESOLVED    (a person did it themselves)
+                          POST /reject  ──► ESCALATED   (the agent was wrong)
                                     │
                                     ▼
                               Audit log (every step above)
@@ -169,8 +170,8 @@ Worker (trusted code — writes its own bookkeeping straight to Postgres)
    routes retrieval through it; there is no raw-SQL tool by design.
 8. **Agent orchestration** — retrieve, prompt, validate, gate, persist. Order
    decided in Python; the model only supplies the judgement in the middle.
-9. **Human approval + n8n** ← you are here — `/approve` and `/reject`, plus a
-   webhook to n8n that branches on priority.
+9. **Human approval + n8n** ← you are here — `/approve`, `/reject` and
+   `/handled`, plus a webhook to n8n that branches on priority.
 10. **Failure handling / retries / DLQ** — queue-level retry, backoff and
     dead-lettering landed in Phase 3; Phase 6-8 added the AI-specific cases
     (model unreachable, invalid JSON, no evidence, low confidence).
@@ -230,7 +231,7 @@ Full walkthrough with talking points for each screen: **[docs/DEMO.md](docs/DEMO
 `http://localhost:8000` serves a single page: raise a ticket, watch it move
 through the pipeline, expand what the model actually said (root cause,
 resolution, confidence, which documents it cited, which it was shown), and
-approve or reject anything waiting on a human.
+approve, reject or hand-close anything waiting on a human.
 
 Plain HTML and fetch against the same endpoints documented below - no build
 step, no npm, no separate frontend container to keep running. It polls every
@@ -261,8 +262,27 @@ The model reports a confidence. It does not decide whether that is good enough �
 | CRITICAL priority | Human approval |
 | Otherwise | Auto-recommended |
 
-Approve resolves the ticket; reject escalates it, because a human disagreeing
-means it still needs solving by someone else.
+### What a person can decide
+
+Three outcomes, not two. The obvious design is approve or reject, and it is
+wrong: reject ends up meaning both "the agent got this wrong" and "never mind,
+I will deal with it myself", which are different claims about the same ticket.
+
+| Decision | Ticket becomes | What it records |
+| --- | --- | --- |
+| Approve action | `RESOLVED` | Do what the agent proposed |
+| Handled myself | `RESOLVED` | A person did the work; no verdict on the agent |
+| Reject action | `ESCALATED` | The agent's recommendation was wrong, someone else still has to solve it |
+
+The distinction matters because the approvals log is the only evidence a later
+review has. Folding "I sorted it myself" into "reject" makes the agent look
+wrong far more often than it was, and that number is exactly what anyone
+deciding whether to trust it will look at first.
+
+**Known rough edge:** after the last SLA chase at 480 minutes nothing chases
+again, and `ESCALATED` has no onward routing, so a ticket nobody acts on sits
+there indefinitely. The system is good at deciding when a person is needed and
+has nothing to say about whether one turned up.
 
 **Known rough edge:** the sensitive-topic check is naive substring matching, so
 a resolution saying "delete the saved credential entry" trips the `delete`

@@ -134,8 +134,19 @@ class AgentRunStatus(str, enum.Enum):
 
 
 class ApprovalDecision(str, enum.Enum):
-    APPROVED = "APPROVED"
-    REJECTED = "REJECTED"
+    """What a person decided about the agent's recommendation.
+
+    Three outcomes rather than two, because REJECTED was doing two jobs. It
+    meant both "the agent got this wrong" and "never mind, I will deal with it
+    myself", and those are different claims: the first is a verdict on the
+    answer, the second says nothing about the answer at all. Recording them
+    identically made the approvals log overstate how often the agent was wrong,
+    and this log is the only evidence a later review has.
+    """
+
+    APPROVED = "APPROVED"  # do what the agent proposed
+    REJECTED = "REJECTED"  # the agent's recommendation was wrong
+    HANDLED = "HANDLED"  # a person dealt with it, no verdict on the agent
 
 
 class AgentRun(Base):
