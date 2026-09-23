@@ -5,6 +5,7 @@ from shared.models import (
     AgentRunStatus,
     Approval,
     ApprovalDecision,
+    AuditLog,
     Ticket,
     TicketStatus,
     User,
@@ -59,6 +60,66 @@ def test_rejecting_escalates_rather_than_closing(client, db_session):
     db_session.refresh(ticket)
     # A human disagreeing means the ticket still needs solving, by someone else.
     assert ticket.status == TicketStatus.ESCALATED
+
+
+def test_handling_it_yourself_closes_the_ticket_without_blaming_the_agent(client, db_session):
+    ticket = _awaiting_ticket(db_session, "handler@example.com")
+
+    response = client.post(
+        f"/tickets/{ticket.id}/handled",
+        json={"decided_by_id": ticket.submitted_by_id, "reason": "Rang them, sorted in a minute"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["decision"] == "HANDLED"
+
+    db_session.refresh(ticket)
+    # The work is done, so the ticket closes like an approval does.
+    assert ticket.status == TicketStatus.RESOLVED
+    approval = db_session.query(Approval).filter_by(ticket_id=ticket.id).one()
+    # But it is not an approval: nobody said the agent's answer was right.
+    assert approval.decision == ApprovalDecision.HANDLED
+    assert approval.decision is not ApprovalDecision.APPROVED
+
+
+def test_handling_is_recorded_separately_from_rejection(client, db_session):
+    """The whole point of the third route: these two must stay distinguishable.
+
+    Before this existed, closing a ticket by hand meant pressing Reject, which
+    left a permanent record saying the agent was wrong when nobody had claimed
+    that. The audit event has to separate them too, not just the enum.
+    """
+    handled = _awaiting_ticket(db_session, "sorted@example.com")
+    rejected = _awaiting_ticket(db_session, "wrong@example.com")
+
+    client.post(f"/tickets/{handled.id}/handled", json={})
+    client.post(f"/tickets/{rejected.id}/reject", json={})
+
+    db_session.refresh(handled)
+    db_session.refresh(rejected)
+    assert handled.status == TicketStatus.RESOLVED
+    assert rejected.status == TicketStatus.ESCALATED
+
+    events = {
+        row.ticket_id: row.event_type
+        for row in db_session.query(AuditLog)
+        .filter(
+            AuditLog.ticket_id.in_([handled.id, rejected.id]),
+            AuditLog.event_type.like("human_%"),
+        )
+        .all()
+    }
+    assert events[handled.id] == "human_handled"
+    assert events[rejected.id] == "human_rejected"
+
+
+def test_cannot_handle_a_ticket_that_is_not_awaiting_approval(client, db_session):
+    ticket = _awaiting_ticket(db_session, "alreadydone@example.com")
+    ticket.status = TicketStatus.RESOLVED
+    db_session.commit()
+
+    # Same guard as approve and reject: a decided ticket cannot be decided again.
+    assert client.post(f"/tickets/{ticket.id}/handled", json={}).status_code == 409
 
 
 def test_cannot_approve_a_ticket_that_is_not_awaiting_approval(client, db_session):

@@ -161,8 +161,24 @@ def reject_ticket(
     ticket_id: int, payload: ApprovalRequest, db: Session = Depends(get_db)
 ) -> Approval:
     # Rejection escalates rather than closing: a human disagreeing with the AI
-    # means the ticket still needs solving, by someone else.
+    # means the ticket still needs solving, by someone else. Use this only when
+    # the agent was actually wrong - /handled is the route for a person who is
+    # simply doing the work themselves.
     return _decide(ticket_id, payload, ApprovalDecision.REJECTED, TicketStatus.ESCALATED, db)
+
+
+@router.post("/{ticket_id}/handled", response_model=ApprovalOut, status_code=201)
+def handle_ticket_manually(
+    ticket_id: int, payload: ApprovalRequest, db: Session = Depends(get_db)
+) -> Approval:
+    """A person dealt with this themselves, passing no judgement on the agent.
+
+    Closes the ticket like an approval, because the work is done either way,
+    but records a different decision. Without this route the only way to close
+    a ticket by hand is to press Reject, which writes "the agent was wrong"
+    into the permanent record whether or not it was.
+    """
+    return _decide(ticket_id, payload, ApprovalDecision.HANDLED, TicketStatus.RESOLVED, db)
 
 
 @router.get("/{ticket_id}/analysis", response_model=list[AgentRunOut])

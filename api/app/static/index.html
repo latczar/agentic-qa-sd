@@ -76,6 +76,7 @@
   .decided b { font-weight: 650; }
   .decided.approved b { color: var(--ok); }
   .decided.rejected b { color: var(--bad); }
+  .decided.handled b { color: var(--info); }
   .decided .why { color: var(--muted); }
   .by-ai { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
 </style>
@@ -161,6 +162,12 @@ function analysisHtml(run) {
   </div>`;
 }
 
+const DECISION_PHRASE = {
+  APPROVED: "approved the agent's proposed action",
+  REJECTED: "rejected the agent's proposed action",
+  HANDLED: "handled this ticket themselves, without using the agent's recommendation",
+};
+
 function decisionHtml(t) {
   const a = approvalsByTicket[t.id];
   if (a) {
@@ -175,11 +182,16 @@ function decisionHtml(t) {
     // the exact opposite of a proposed action that says deny it. The record is
     // the only thing an incident review has, so it has to survive being
     // skim-read.
-    const verb = a.decision === "APPROVED" ? "approved" : "rejected";
-    const cls = a.decision === "APPROVED" ? "approved" : "rejected";
+    //
+    // Three decisions, not two (see shared/models.py). "Rejected" is a verdict
+    // on the agent; "handled" is not. A log that cannot tell them apart reads
+    // as if the agent was wrong every time a person just did the work.
+    const phrase = DECISION_PHRASE[a.decision];
+    if (!phrase) return "";
+    const cls = a.decision.toLowerCase();
     const who = esc(a.decided_by_name) || "Someone";
     const why = a.reason ? ` <span class="why">— ${esc(a.reason)}</span>` : "";
-    return `<div class="decided ${cls}"><b>${who} ${verb} the agent's proposed action</b>${why}</div>`;
+    return `<div class="decided ${cls}"><b>${who} ${phrase}</b>${why}</div>`;
   }
   if (t.status === "RESOLVED") {
     return `<div class="by-ai">Auto-recommended — no human review required</div>`;
@@ -202,7 +214,8 @@ function ticketHtml(t, run) {
       <button class="ghost toggle">${analysisCache[t.id] ? "Hide" : "Show"} analysis</button>
       ${awaiting ? `<input class="reason" placeholder="Reason (optional)" style="width:auto;flex:1;min-width:160px;margin:0">
                     <button class="ghost approve" style="color:#fff;background:var(--ok);border-color:transparent">Approve action</button>
-                    <button class="ghost reject" style="color:#fff;background:var(--bad);border-color:transparent">Reject action</button>` : ""}
+                    <button class="ghost reject" style="color:#fff;background:var(--bad);border-color:transparent">Reject action</button>
+                    <button class="ghost handled" title="Close this yourself without judging the agent's answer">Handled myself</button>` : ""}
     </div>
   </div>`;
 }
@@ -232,8 +245,10 @@ $("#tickets").addEventListener("click", async (e) => {
     return render();
   }
 
+  // Each button posts to the endpoint of the same name.
   const decision = e.target.classList.contains("approve") ? "approve"
-                 : e.target.classList.contains("reject") ? "reject" : null;
+                 : e.target.classList.contains("reject") ? "reject"
+                 : e.target.classList.contains("handled") ? "handled" : null;
   if (!decision) return;
 
   const reason = card.querySelector(".reason")?.value.trim() || null;
