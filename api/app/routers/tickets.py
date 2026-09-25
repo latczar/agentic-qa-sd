@@ -43,10 +43,17 @@ def create_ticket(payload: TicketCreate, db: Session = Depends(get_db)) -> Ticke
         submitted_by_id=payload.submitted_by_id,
         subject=payload.subject,
         description=payload.description,
+        source=payload.source,
     )
     db.add(ticket)
     db.flush()  # assigns ticket.id so the audit log row below can reference it
-    db.add(AuditLog(ticket_id=ticket.id, event_type="ticket_created", detail={"subject": ticket.subject}))
+    db.add(
+        AuditLog(
+            ticket_id=ticket.id,
+            event_type="ticket_created",
+            detail={"subject": ticket.subject, "source": ticket.source.value},
+        )
+    )
     db.commit()
     db.refresh(ticket)
 

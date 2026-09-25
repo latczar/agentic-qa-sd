@@ -7,6 +7,7 @@ from shared.models import (
     ApprovalDecision,
     Priority,
     ServiceStatus,
+    TicketSource,
     TicketStatus,
     UserRole,
 )
@@ -19,6 +20,7 @@ class UserOut(BaseModel):
     name: str
     email: str
     role: UserRole
+    telegram_chat_id: int | None = None
     created_at: datetime
 
 
@@ -36,6 +38,9 @@ class TicketCreate(BaseModel):
     submitted_by_id: int
     subject: str = Field(min_length=1, max_length=200)
     description: str = Field(min_length=1)
+    # Defaulted rather than required, so every existing caller (the web form,
+    # the tests, curl in the README) keeps working untouched.
+    source: TicketSource = TicketSource.WEB
 
 
 class TicketUpdate(BaseModel):
@@ -55,6 +60,7 @@ class TicketOut(BaseModel):
     subject: str
     description: str
     status: TicketStatus
+    source: TicketSource
     category: str | None
     priority: Priority | None
     affected_service_id: int | None

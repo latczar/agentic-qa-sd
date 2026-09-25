@@ -94,3 +94,13 @@ jobs:
       - name: Run MCP server tests
         working-directory: mcp_server
         run: pytest -v
+
+      - name: Install Telegram bot dependencies
+        working-directory: telegram_bot
+        run: pip install -r requirements.txt
+
+      - name: Run Telegram bot tests
+        working-directory: telegram_bot
+        # No bot token here and none needed: the Telegram client and the
+        # service desk API are both faked, so this never touches the network.
+        run: pytest -v
