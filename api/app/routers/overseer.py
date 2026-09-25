@@ -28,6 +28,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.schemas import AuditEventOut, BoardOut, OutcomeOut, WaitingTicketOut
@@ -339,10 +340,22 @@ def overseer_board(db: Session = Depends(get_db)) -> BoardOut:
     ]
     by_person = _deciders(db, solved_today_ids)
 
+    # Same rule as _deciders: a resolved ticket with an approval row was
+    # solved by a person, and one without was solved by the agent alone.
+    solved_total = db.query(func.count(Ticket.id)).filter(Ticket.status == TicketStatus.RESOLVED).scalar()
+    solved_with_help_total = (
+        db.query(func.count(func.distinct(Approval.ticket_id)))
+        .join(Ticket, Ticket.id == Approval.ticket_id)
+        .filter(Ticket.status == TicketStatus.RESOLVED)
+        .scalar()
+    )
+
     return BoardOut(
         waiting=cards,
         solved=_outcomes(db, TicketStatus.RESOLVED),
         failed=_outcomes(db, TicketStatus.FAILED),
         solved_today=len(solved_today_ids),
         solved_automatically_today=len([i for i in solved_today_ids if i not in by_person]),
+        solved_total=solved_total,
+        solved_automatically_total=solved_total - solved_with_help_total,
     )
