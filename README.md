@@ -7,16 +7,21 @@ is low or the action is sensitive. Built to show production-style patterns: asyn
 processing over a real queue, retries and dead-lettering, idempotency, structured
 output validation, and human-in-the-loop control — not just "call an LLM".
 
+Tickets arrive from a web form or from Telegram, and the person holding the
+approvals can decide from either. A console shows which queue holds what, and
+what each queue is for.
+
 ## Status
 
 [![CI](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml/badge.svg)](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml)
 
-Phases 1-11 of 12. The full pipeline runs end to end on a laptop: a ticket is
+Phases 1-13. The full pipeline runs end to end on a laptop: a ticket is
 queued, analysed by a local model against knowledge retrieved through MCP,
 gated on confidence and risk, and either auto-recommended or routed to a human
-whose decision comes back through n8n. Measured against a 40-case evaluation
-set, not eyeballed - and the evaluation has already caught two escalation bugs
-that 75 passing unit tests did not.
+whose decision comes back through n8n, through the console, or through a
+Telegram message. Measured against a 40-case evaluation set, not eyeballed -
+and the evaluation has already caught two escalation bugs that 75 passing unit
+tests did not.
 
 Everything runs locally: no paid APIs, no cloud services, no API keys.
 
@@ -182,6 +187,12 @@ Worker (trusted code — writes its own bookkeeping straight to Postgres)
     retrieval hit rate, Recall@1, category accuracy, escalation correctness and
     unsupported-citation rate. See [Evaluation](#evaluation).
 12. Documentation and demo
+13. **Telegram channel and the console** — tickets can arrive from a chat and
+    approvals can be decided from a phone, both through the same endpoints the
+    browser uses. A tabbed console replaces the single list: what is waiting on
+    you, where every ticket currently sits, and what each queue is for.
+    `/instruct` lands here too — correcting the agent and sending the ticket
+    back round, rather than only accepting or overruling what it produced.
 
 ## Local setup
 
@@ -229,17 +240,29 @@ behind it - the strongest single frame in the project:
 
 Full walkthrough with talking points for each screen: **[docs/DEMO.md](docs/DEMO.md)**.
 
-### The UI
+### The console
 
-`http://localhost:8000` serves a single page: raise a ticket, watch it move
-through the pipeline, expand what the model actually said (root cause,
-resolution, confidence, which documents it cited, which it was shown), and
-approve, reject or hand-close anything waiting on a human.
+`http://localhost:8000` serves a four-tab console.
+
+| Tab | What it is for |
+| --- | --- |
+| **Needs you** | Only the tickets waiting on a person, with a count badge. Approve, hand-close, overrule, or correct the agent and send it back round |
+| **Pipeline** | Every queue in the system, in the order work moves through them, with a live count and a sentence saying what that queue is for. Plus whether Postgres, RabbitMQ, Ollama, the MCP server and Telegram are reachable |
+| **Board** | Every ticket, newest first |
+| **Raise a ticket** | The submission form |
+
+The Pipeline tab is the one worth looking at. Each row is a real queue, not a
+metaphor: an amber dot means work is sitting on a person, red means something
+is stuck, and a pulsing blue dot means work is actually moving. There is no
+stage on that screen that does not correspond to a ticket status the worker
+really sets, which is the whole point - a dashboard that invents stages to look
+busy is worse than no dashboard.
 
 Plain HTML and fetch against the same endpoints documented below - no build
 step, no npm, no separate frontend container to keep running. It polls every
 few seconds because tickets change state in the background while nobody is
-looking at them.
+looking at them, and checks the network dependencies on a slower timer because
+those cross the network and one of them is a model server.
 
 ### Watching one ticket go through the API directly
 

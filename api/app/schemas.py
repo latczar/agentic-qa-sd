@@ -138,3 +138,33 @@ class InstructRequest(BaseModel):
 
     instruction: str = Field(min_length=1, max_length=2000)
     instructed_by_id: int | None = None
+
+
+class StageOut(BaseModel):
+    """One stage of the pipeline, as the console draws it."""
+
+    key: str
+    label: str
+    does: str
+    count: int
+    # "flowing" | "waiting" | "idle" | "stuck" - what colour the dot is.
+    state: str
+
+
+class OverviewOut(BaseModel):
+    needs_you: int
+    stages: list[StageOut]
+    by_source: dict[str, int]
+    open_total: int
+    resolved_today: int
+    escalated_open: int
+
+
+class DependencyOut(BaseModel):
+    name: str
+    ok: bool
+    detail: str
+    # "up", "down" or "off". "off" is for optional parts nobody has switched
+    # on: painting those red would make a correctly configured stack look
+    # broken, and a red dot is the first thing anyone watching asks about.
+    state: str = "up"

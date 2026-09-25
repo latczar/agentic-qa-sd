@@ -30,13 +30,32 @@
     font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   header {
-    padding: 18px 16px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    padding: 14px 16px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   }
-  header h1 { font-size: 18px; margin: 0; font-weight: 650; }
-  header .sub { color: var(--muted); font-size: 13px; }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: 340px 1fr; }
-  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; flex: 1; min-width: 180px; }
+  header .who { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+  header .who select { width: auto; padding: 5px 8px; font-size: 13px; }
+
+  /* Tabs ------------------------------------------------------------------ */
+  nav { display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  nav button {
+    background: transparent; border: 0; border-bottom: 2px solid transparent;
+    color: var(--muted); font-weight: 600; font-size: 13px; letter-spacing: .04em;
+    text-transform: uppercase; padding: 11px 12px; width: auto; margin: 0; border-radius: 0;
+    display: flex; align-items: center; gap: 7px;
+  }
+  nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  nav .pill {
+    background: var(--bad); color: #fff; border-radius: 999px; font-size: 11px;
+    padding: 1px 7px; font-variant-numeric: tabular-nums; letter-spacing: 0;
+  }
+  nav .pill.quiet { background: var(--line); color: var(--muted); }
+
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .cols { display: grid; gap: 16px; grid-template-columns: 340px 1fr; }
+  @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
   .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
   label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
@@ -48,9 +67,12 @@
   button { cursor: pointer; border-color: transparent; background: var(--accent); color: #fff; font-weight: 600; margin-top: 14px; }
   button:disabled { opacity: .55; cursor: default; }
   button.ghost { background: transparent; border-color: var(--line); color: var(--text); font-weight: 500; margin: 0; width: auto; padding: 6px 12px; }
-  button.approve { background: var(--ok); }
-  button.reject { background: var(--bad); }
+  button.solid-ok { background: var(--ok); color: #fff; border-color: transparent; margin: 0; width: auto; padding: 6px 12px; font-weight: 600; }
+  button.solid-bad { background: var(--bad); color: #fff; border-color: transparent; margin: 0; width: auto; padding: 6px 12px; font-weight: 600; }
+
+  /* Tickets --------------------------------------------------------------- */
   .ticket { border: 1px solid var(--line); border-radius: 9px; padding: 12px; margin-bottom: 10px; background: var(--panel); }
+  .ticket.needs { border-left: 3px solid var(--warn); }
   .ticket .top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .ticket .subj { font-weight: 600; flex: 1; min-width: 200px; }
   .id { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
@@ -60,6 +82,8 @@
   .b-AWAITING_APPROVAL { color: var(--warn); border-color: var(--warn); }
   .b-RESOLVED { color: var(--ok); border-color: var(--ok); }
   .b-ESCALATED, .b-FAILED { color: var(--bad); border-color: var(--bad); }
+  .src { font-size: 11px; letter-spacing: .04em; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px; }
+  .src.telegram { color: var(--info); border-color: var(--info); }
   .meta { color: var(--muted); font-size: 13px; margin-top: 6px; }
   .analysis { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); font-size: 14px; display: grid; gap: 8px; }
   .row { display: grid; grid-template-columns: 130px 1fr; gap: 10px; }
@@ -69,6 +93,8 @@
   .bar i { display: block; height: 100%; background: var(--accent); }
   .cites code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: 12.5px; margin-right: 6px; display: inline-block; }
   .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  .instruct-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+  .instruct-row input { flex: 1; min-width: 140px; margin: 0; }
   .empty { color: var(--muted); padding: 24px; text-align: center; }
   .err { color: var(--bad); font-size: 13px; margin-top: 8px; }
   .note { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
@@ -79,48 +105,126 @@
   .decided.handled b { color: var(--info); }
   .decided .why { color: var(--muted); }
   .by-ai { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .steer { font-size: 12.5px; margin-top: 6px; padding: 5px 9px; border-radius: 6px; background: var(--panel-2); border: 1px dashed var(--accent); color: var(--muted); }
+  .steer b { color: var(--accent); font-weight: 650; }
+
+  /* Pipeline -------------------------------------------------------------- */
+  .stage { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); margin-bottom: 8px; }
+  .stage .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--line); }
+  .stage.flowing .dot { background: var(--info); animation: pulse 1.6s ease-in-out infinite; }
+  .stage.waiting .dot { background: var(--warn); }
+  .stage.stuck .dot { background: var(--bad); }
+  .stage.waiting { border-left: 3px solid var(--warn); }
+  .stage.stuck { border-left: 3px solid var(--bad); }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+  .stage .name { font-weight: 600; min-width: 96px; }
+  .stage .does { color: var(--muted); font-size: 13px; flex: 1; min-width: 180px; }
+  .stage .n { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 650; min-width: 40px; text-align: right; }
+  .stage.idle .n { color: var(--muted); font-weight: 500; }
+  .dep { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .dep:last-child { border-bottom: 0; }
+  .dep .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dep.up .dot { background: var(--ok); }
+  .dep.down .dot { background: var(--bad); }
+  .dep.off .dot { background: var(--line); }
+  .dep.off .name { color: var(--muted); }
+  .dep .name { font-weight: 600; min-width: 96px; }
+  .dep .detail { color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; }
+  .tile .n { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .l { color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <header>
   <h1>AI Service Desk</h1>
   <span class="sub">local models · RAG over pgvector · human-in-the-loop</span>
+  <span class="who">
+    <label for="user" style="margin:0">Acting as</label>
+    <select id="user" required></select>
+  </span>
 </header>
 
+<nav id="tabs">
+  <button data-tab="needs" aria-selected="true">Needs you <span class="pill quiet" id="needs-pill">0</span></button>
+  <button data-tab="pipeline" aria-selected="false">Pipeline</button>
+  <button data-tab="board" aria-selected="false">Board <span class="pill quiet" id="board-pill">0</span></button>
+  <button data-tab="raise" aria-selected="false">Raise a ticket</button>
+</nav>
+
 <div class="wrap">
-  <div>
-    <div class="card">
-      <h2>Raise a ticket</h2>
-      <form id="new-ticket">
-        <label for="user">Reported by</label>
-        <select id="user" required></select>
+  <!-- Needs you ---------------------------------------------------------- -->
+  <section id="tab-needs">
+    <div id="needs"><div class="empty">Loading…</div></div>
+  </section>
 
-        <label for="subject">Subject</label>
-        <input id="subject" required maxlength="200" placeholder="VPN keeps dropping">
-
-        <label for="description">What's happening?</label>
-        <textarea id="description" required placeholder="Since changing my password the VPN disconnects every few minutes."></textarea>
-
-        <button type="submit" id="submit-btn">Submit ticket</button>
-        <div class="err" id="form-err" hidden></div>
-        <div class="note">Analysis runs asynchronously — the ticket appears immediately and updates once the worker has finished with it.</div>
-      </form>
+  <!-- Pipeline ----------------------------------------------------------- -->
+  <section id="tab-pipeline" hidden>
+    <div class="tiles" id="tiles"></div>
+    <div class="cols">
+      <div>
+        <div class="card">
+          <h2>Services</h2>
+          <div id="deps"><div class="empty">Checking…</div></div>
+          <div class="note">Checked every 20 seconds, separately from the counts, because these reach across the network and the counts do not.</div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="margin-bottom:12px">
+          <h2>Where work is right now</h2>
+          <div class="note" style="margin:0">Each row is a real queue in the pipeline, in the order a ticket moves through them. An amber dot means something is waiting on a person; red means something is stuck.</div>
+        </div>
+        <div id="stages"></div>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div>
-    <div class="card" style="margin-bottom:12px; display:flex; align-items:center; gap:10px;">
-      <h2 style="margin:0; flex:1">Tickets</h2>
-      <button class="ghost" id="refresh">Refresh</button>
-    </div>
+  <!-- Board -------------------------------------------------------------- -->
+  <section id="tab-board" hidden>
     <div id="tickets"><div class="empty">Loading…</div></div>
-  </div>
+  </section>
+
+  <!-- Raise -------------------------------------------------------------- -->
+  <section id="tab-raise" hidden>
+    <div class="cols">
+      <div>
+        <div class="card">
+          <h2>Raise a ticket</h2>
+          <form id="new-ticket">
+            <label for="subject">Subject</label>
+            <input id="subject" required maxlength="200" placeholder="VPN keeps dropping">
+
+            <label for="description">What's happening?</label>
+            <textarea id="description" required placeholder="Since changing my password the VPN disconnects every few minutes."></textarea>
+
+            <button type="submit" id="submit-btn">Submit ticket</button>
+            <div class="err" id="form-err" hidden></div>
+            <div class="note">Filed as whoever is selected in "Acting as". Analysis runs asynchronously — the ticket appears immediately and updates once the worker has finished with it.</div>
+          </form>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>Or message the bot</h2>
+          <div class="note" style="margin:0">
+            If Telegram is configured, any message to the bot becomes a ticket, and approval
+            requests arrive there with Approve, I handled it and Agent was wrong as buttons.
+            The bot posts to the same endpoints this page does, so a decision made on a phone
+            lands in the same approvals record with the same guards.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 </div>
 
 <script>
 const $ = (s) => document.querySelector(s);
 const analysisCache = {};
 let approvalsByTicket = {};
+let state = { tab: "needs", tickets: [], overview: null, health: [] };
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -199,38 +303,135 @@ function decisionHtml(t) {
   return "";
 }
 
-function ticketHtml(t, run) {
+// A correction that is still in force. Shown wherever the ticket is, because
+// the next answer the agent gives was produced under this instruction and
+// reading that answer without knowing it was steered would be misleading.
+function steerHtml(t) {
+  if (!t.human_instruction) return "";
+  return `<div class="steer"><b>Steered:</b> ${esc(t.human_instruction)}</div>`;
+}
+
+function sourceHtml(t) {
+  if (t.source !== "TELEGRAM") return "";
+  return `<span class="src telegram">via Telegram</span>`;
+}
+
+function ticketHtml(t, run, opts = {}) {
   const awaiting = t.status === "AWAITING_APPROVAL";
-  return `<div class="ticket" data-id="${t.id}">
+  const canInstruct = awaiting || t.status === "ESCALATED";
+  return `<div class="ticket ${awaiting && opts.highlight ? "needs" : ""}" data-id="${t.id}">
     <div class="top">
       <span class="id">#${t.id}</span>
       <span class="subj">${esc(t.subject)}</span>
+      ${sourceHtml(t)}
       <span class="badge b-${esc(t.status)}">${esc(t.status.replace(/_/g, " "))}</span>
     </div>
     <div class="meta">${esc(t.category) || "uncategorised"}${t.priority ? " · " + esc(t.priority) : ""}</div>
     ${decisionHtml(t)}
+    ${steerHtml(t)}
     ${analysisHtml(run)}
     <div class="actions">
       <button class="ghost toggle">${analysisCache[t.id] ? "Hide" : "Show"} analysis</button>
-      ${awaiting ? `<input class="reason" placeholder="Reason (optional)" style="width:auto;flex:1;min-width:160px;margin:0">
-                    <button class="ghost approve" style="color:#fff;background:var(--ok);border-color:transparent">Approve action</button>
-                    <button class="ghost reject" style="color:#fff;background:var(--bad);border-color:transparent">Reject action</button>
+      ${awaiting ? `<input class="reason" placeholder="Reason (optional)" style="width:auto;flex:1;min-width:150px;margin:0">
+                    <button class="solid-ok approve">Approve action</button>
+                    <button class="solid-bad reject" title="The agent's recommendation was wrong">Agent was wrong</button>
                     <button class="ghost handled" title="Close this yourself without judging the agent's answer">Handled myself</button>` : ""}
     </div>
+    ${canInstruct ? `<div class="instruct-row">
+      <input class="instruction" placeholder="Correct the agent and send it round again…">
+      <button class="ghost instruct">Instruct</button>
+    </div>` : ""}
   </div>`;
 }
 
-async function render() {
-  const [tickets, approvals] = await Promise.all([api("/tickets"), api("/approvals")]);
+function renderNeeds() {
+  const waiting = state.tickets.filter((t) => t.status === "AWAITING_APPROVAL");
+  const el = $("#needs");
+  el.innerHTML = waiting.length
+    ? waiting.map((t) => ticketHtml(t, analysisCache[t.id], { highlight: true })).join("")
+    : `<div class="empty">Nothing is waiting on you.</div>`;
+}
+
+function renderBoard() {
+  const el = $("#tickets");
+  el.innerHTML = state.tickets.length
+    ? state.tickets.map((t) => ticketHtml(t, analysisCache[t.id])).join("")
+    : `<div class="empty">No tickets yet.</div>`;
+}
+
+function renderPipeline() {
+  const o = state.overview;
+  if (!o) return;
+
+  $("#tiles").innerHTML = [
+    ["Open", o.open_total],
+    ["Waiting on you", o.needs_you],
+    ["Escalated", o.escalated_open],
+    ["Resolved today", o.resolved_today],
+    ["Via Telegram", o.by_source.TELEGRAM ?? 0],
+  ].map(([label, n]) => `<div class="tile"><div class="n">${n}</div><div class="l">${esc(label)}</div></div>`).join("");
+
+  $("#stages").innerHTML = o.stages.map((s) => `
+    <div class="stage ${esc(s.state)}">
+      <span class="dot"></span>
+      <span class="name">${esc(s.label)}</span>
+      <span class="does">${esc(s.does)}</span>
+      <span class="n">${s.count}</span>
+    </div>`).join("");
+}
+
+function renderHealth() {
+  const el = $("#deps");
+  if (!state.health.length) { el.innerHTML = `<div class="empty">Checking…</div>`; return; }
+  el.innerHTML = state.health.map((d) => `
+    <div class="dep ${esc(d.state || (d.ok ? "up" : "down"))}">
+      <span class="dot"></span>
+      <span class="name">${esc(d.name)}</span>
+      <span class="detail">${esc(d.detail)}</span>
+    </div>`).join("");
+}
+
+function renderTabs() {
+  const needs = state.overview?.needs_you ?? 0;
+  const pill = $("#needs-pill");
+  pill.textContent = needs;
+  pill.className = needs ? "pill" : "pill quiet";
+  $("#board-pill").textContent = state.tickets.length;
+
+  for (const btn of document.querySelectorAll("#tabs button")) {
+    const on = btn.dataset.tab === state.tab;
+    btn.setAttribute("aria-selected", String(on));
+    $(`#tab-${btn.dataset.tab}`).hidden = !on;
+  }
+}
+
+async function refresh() {
+  const [tickets, approvals, overview] = await Promise.all([
+    api("/tickets"), api("/approvals"), api("/overview"),
+  ]);
   // Newest first from the API, so the first one seen per ticket is the latest.
   approvalsByTicket = {};
   for (const a of approvals) if (!approvalsByTicket[a.ticket_id]) approvalsByTicket[a.ticket_id] = a;
-  const el = $("#tickets");
-  if (!tickets.length) { el.innerHTML = `<div class="empty">No tickets yet.</div>`; return; }
-  el.innerHTML = tickets.map((t) => ticketHtml(t, analysisCache[t.id])).join("");
+  state.tickets = tickets;
+  state.overview = overview;
+  renderTabs();
+  renderNeeds();
+  renderBoard();
+  renderPipeline();
 }
 
-$("#tickets").addEventListener("click", async (e) => {
+async function refreshHealth() {
+  try {
+    state.health = await api("/overview/health");
+  } catch {
+    state.health = [];
+  }
+  renderHealth();
+}
+
+// Decisions and corrections are the same click handler on both lists, because
+// a card is a card wherever it is drawn.
+async function onCardClick(e) {
   const card = e.target.closest(".ticket");
   if (!card) return;
   const id = Number(card.dataset.id);
@@ -239,10 +440,35 @@ $("#tickets").addEventListener("click", async (e) => {
     if (analysisCache[id]) delete analysisCache[id];
     else {
       const runs = await api(`/tickets/${id}/analysis`);
+      // Newest first, so runs[0] is the answer produced by the most recent
+      // attempt - which, after an instruction, is the corrected one.
       analysisCache[id] = runs[0] || null;
       if (!runs.length) alert("No analysis recorded for this ticket yet.");
     }
-    return render();
+    return refresh();
+  }
+
+  if (e.target.classList.contains("instruct")) {
+    const input = card.querySelector(".instruction");
+    const instruction = input?.value.trim();
+    if (!instruction) { input?.focus(); return; }
+    e.target.disabled = true;
+    try {
+      await api(`/tickets/${id}/instruct`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction, instructed_by_id: Number($("#user").value) || null }),
+      });
+      // Dropped on purpose: the cached analysis is the answer the agent gave
+      // before being corrected, and leaving it on screen next to "steered"
+      // would show the old answer as though it were the new one.
+      delete analysisCache[id];
+      await refresh();
+    } catch (err) {
+      alert(err.message);
+      e.target.disabled = false;
+    }
+    return;
   }
 
   // Each button posts to the endpoint of the same name.
@@ -259,11 +485,22 @@ $("#tickets").addEventListener("click", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decided_by_id: Number($("#user").value) || null, reason }),
     });
-    await render();
+    await refresh();
   } catch (err) {
     alert(err.message);
     e.target.disabled = false;
   }
+}
+
+$("#needs").addEventListener("click", onCardClick);
+$("#tickets").addEventListener("click", onCardClick);
+
+$("#tabs").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tab]");
+  if (!btn) return;
+  state.tab = btn.dataset.tab;
+  renderTabs();
+  if (state.tab === "pipeline") refreshHealth();
 });
 
 $("#new-ticket").addEventListener("submit", async (e) => {
@@ -281,7 +518,8 @@ $("#new-ticket").addEventListener("submit", async (e) => {
       }),
     });
     $("#subject").value = ""; $("#description").value = "";
-    await render();
+    state.tab = "board";
+    await refresh();
   } catch (e2) {
     err.textContent = e2.message; err.hidden = false;
   } finally {
@@ -289,19 +527,26 @@ $("#new-ticket").addEventListener("submit", async (e) => {
   }
 });
 
-$("#refresh").addEventListener("click", render);
-
 // Tickets change state in the background as the worker gets to them, so poll
 // rather than making someone press refresh to find out what happened.
 setInterval(() => {
+  // Re-rendering wipes whatever is half-typed in a reason or an instruction,
+  // which is infuriating when the poll lands mid-sentence.
   const typing = document.activeElement;
-  if (typing && typing.classList.contains("reason") && typing.value) return;
-  render();
+  if (typing && (typing.classList.contains("reason") || typing.classList.contains("instruction")) && typing.value) return;
+  refresh().catch(() => {});
 }, 4000);
 
-loadUsers().then(render).catch((e) => {
-  $("#tickets").innerHTML = `<div class="empty err">Could not reach the API: ${esc(e.message)}</div>`;
-});
+// Separately, and far less often: these checks cross the network, and one of
+// them is a model server that has better things to do than answer a status dot.
+setInterval(refreshHealth, 20000);
+
+loadUsers()
+  .then(refresh)
+  .then(refreshHealth)
+  .catch((e) => {
+    $("#needs").innerHTML = `<div class="empty err">Could not reach the API: ${esc(e.message)}</div>`;
+  });
 </script>
 </body>
 </html>
