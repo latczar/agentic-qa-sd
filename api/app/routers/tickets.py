@@ -9,6 +9,7 @@ from app.schemas import (
     ApprovalRequest,
     CommentCreate,
     CommentOut,
+    InstructRequest,
     TicketCreate,
     TicketOut,
     TicketUpdate,
@@ -186,6 +187,93 @@ def handle_ticket_manually(
     into the permanent record whether or not it was.
     """
     return _decide(ticket_id, payload, ApprovalDecision.HANDLED, TicketStatus.RESOLVED, db)
+
+
+# A correction can be given while the ticket is waiting on a person, and also
+# once it has been escalated. Escalation was previously a dead end - the ticket
+# stopped there and nothing moved it again - so letting an instruction reopen
+# it turns "the agent got this wrong" into something recoverable rather than
+# terminal. RESOLVED is deliberately not here: that ticket is closed, and
+# reopening it silently would undo somebody's decision.
+INSTRUCTABLE = (TicketStatus.AWAITING_APPROVAL, TicketStatus.ESCALATED)
+
+
+@router.post("/{ticket_id}/instruct", response_model=TicketOut, status_code=202)
+def instruct_ticket(
+    ticket_id: int, payload: InstructRequest, db: Session = Depends(get_db)
+) -> Ticket:
+    """Correct the agent and send the ticket back round.
+
+    202 rather than 201: nothing is finished when this returns. The ticket has
+    been put back on the queue and the worker will pick it up, so the honest
+    answer is "accepted", not "done".
+    """
+    ticket = _get_ticket_or_404(ticket_id, db)
+
+    if ticket.status not in INSTRUCTABLE:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"ticket is {ticket.status.value}; an instruction only applies to "
+                f"{' or '.join(s.value for s in INSTRUCTABLE)}"
+            ),
+        )
+
+    # Latest instruction wins. The previous one has been superseded, and
+    # feeding the model a pile of contradictory corrections would make the
+    # result harder to reason about, not better. The full history stays in
+    # audit_logs, and each attempt still gets its own agent_runs row.
+    ticket.human_instruction = payload.instruction
+    # Back to QUEUED before publishing, and this is load-bearing. The worker
+    # refuses to re-analyse a ticket sitting in AWAITING_APPROVAL or ESCALATED,
+    # precisely so a stray duplicate message cannot cancel a human review. This
+    # re-run is deliberate, so it goes through that guard by moving the ticket
+    # rather than by weakening it.
+    ticket.status = TicketStatus.QUEUED
+    db.add(
+        AuditLog(
+            ticket_id=ticket.id,
+            event_type="human_instructed",
+            detail={
+                "instructed_by_id": payload.instructed_by_id,
+                "instruction": payload.instruction,
+            },
+        )
+    )
+    db.commit()
+    db.refresh(ticket)
+
+    try:
+        event_id = publish_ticket_created(ticket.id)
+        db.add(
+            AuditLog(
+                ticket_id=ticket.id,
+                event_type="ticket_queued",
+                detail={"event_id": event_id, "reason": "human_instruction"},
+            )
+        )
+    except Exception as exc:
+        # The instruction is already saved and the ticket already says QUEUED,
+        # so leaving it there would strand it: no message, no worker, no way
+        # back to a person. Put it back where it was and say so.
+        logger.error("failed to re-publish ticket %s after instruction: %s", ticket.id, exc)
+        ticket.status = TicketStatus.AWAITING_APPROVAL
+        db.add(
+            AuditLog(
+                ticket_id=ticket.id,
+                event_type="ticket_queue_failed",
+                detail={"error": str(exc), "reason": "human_instruction"},
+            )
+        )
+        db.commit()
+        db.refresh(ticket)
+        raise HTTPException(
+            status_code=503, detail=f"could not re-queue ticket: {exc}"
+        ) from exc
+
+    db.commit()
+    db.refresh(ticket)
+    return ticket
 
 
 @router.get("/{ticket_id}/analysis", response_model=list[AgentRunOut])

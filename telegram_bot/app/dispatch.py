@@ -32,6 +32,7 @@ HELP = (
     "<b>Service desk</b>\n\n"
     "Send me any message and I will raise it as a ticket.\n\n"
     "/link you@example.com - tell me who you are\n"
+    "/instruct 42 this is a network fault - correct the agent and re-run ticket 42\n"
     "/help - this message"
 )
 
@@ -104,6 +105,19 @@ def _raise_ticket(db: Session, api: ServiceDeskApi, chat_id: int, text: str) -> 
     )
 
 
+def _instruct(db: Session, api: ServiceDeskApi, chat_id: int, argument: str) -> str:
+    user = _linked_user(db, chat_id)
+    parts = argument.strip().split(maxsplit=1)
+    if len(parts) < 2 or not parts[0].isdigit():
+        return "Use: /instruct 42 what the agent should have said"
+
+    ticket_id, instruction = int(parts[0]), parts[1]
+    result = api.instruct(ticket_id, instruction, user.id if user else None)
+    if not result.ok:
+        return f"Ticket #{ticket_id}: {html.escape(result.detail)}"
+    return f"Told the agent, and put ticket <b>#{ticket_id}</b> back through the pipeline."
+
+
 def _handle_message(db: Session, telegram: TelegramClient, api: ServiceDeskApi, message: dict) -> None:
     chat_id = message["chat"]["id"]
     text = (message.get("text") or "").strip()
@@ -127,6 +141,8 @@ def _handle_message(db: Session, telegram: TelegramClient, api: ServiceDeskApi, 
         telegram.send_message(chat_id, HELP)
     elif command == "/link":
         telegram.send_message(chat_id, _link(db, chat_id, argument))
+    elif command == "/instruct":
+        telegram.send_message(chat_id, _instruct(db, api, chat_id, argument))
     elif command.startswith("/"):
         telegram.send_message(chat_id, f"I do not know {html.escape(command)}.\n\n{HELP}")
     else:

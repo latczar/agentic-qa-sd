@@ -86,3 +86,37 @@ def test_no_retrieval_still_says_so_explicitly():
     prompt = build_prompt(ticket(), [], ["VPN Gateway"])
 
     assert "No relevant knowledge articles were found" in prompt
+
+
+# --- Human corrections ----------------------------------------------------
+#
+# An instruction is the mirror image of the ticket: it comes from a named
+# person who is already trusted to approve the agent's answer, so it goes
+# outside the markers rather than inside them. Getting this backwards would
+# fence off the one piece of text that is genuinely meant as an instruction.
+
+
+def test_a_ticket_with_no_instruction_says_nothing_about_corrections():
+    prompt = build_prompt(ticket(), [article()], ["VPN Gateway"])
+    assert "correction" not in prompt.lower()
+
+
+def test_an_instruction_lands_outside_the_untrusted_block():
+    t = ticket()
+    t.human_instruction = "This is a network fault, not an access one"
+    prompt = build_prompt(t, [article()], ["VPN Gateway"])
+
+    assert "This is a network fault, not an access one" in prompt
+    # The property that matters: it is not inside the fence, where the rules
+    # tell the model to treat everything as data rather than instruction.
+    assert "network fault" not in ticket_block(prompt)
+
+
+def test_a_blank_instruction_is_treated_as_no_instruction():
+    """An empty string is not a correction, and must not produce an empty
+    "here is your correction" preamble with nothing after it."""
+    t = ticket()
+    t.human_instruction = "   \n  "
+    prompt = build_prompt(t, [article()], ["VPN Gateway"])
+
+    assert "correction" not in prompt.lower()

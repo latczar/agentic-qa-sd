@@ -41,6 +41,10 @@ class FakeApi:
         self.calls.append(("decide", ticket_id, action, decided_by_id))
         return self._result(ApiResult(201, {"id": 1, "decision": action.upper()}))
 
+    def instruct(self, ticket_id, instruction, instructed_by_id):
+        self.calls.append(("instruct", ticket_id, instruction, instructed_by_id))
+        return self._result(ApiResult(202, {"id": ticket_id}))
+
 
 @pytest.fixture
 def telegram():

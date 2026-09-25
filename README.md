@@ -49,10 +49,12 @@ Worker (trusted code — writes its own bookkeeping straight to Postgres)
                                     ├─ webhook  ──► n8n ──► notify / branch on priority
                                     ├─ Telegram ──► buttons in a chat, on a phone
                                     ▼
-                          POST /approve ──► RESOLVED    (do what the agent said)
-                          POST /handled ──► RESOLVED    (a person did it themselves)
-                          POST /reject  ──► ESCALATED   (the agent was wrong)
-                                    │
+                          POST /approve  ──► RESOLVED   (do what the agent said)
+                          POST /handled  ──► RESOLVED   (a person did it themselves)
+                          POST /reject   ──► ESCALATED  (the agent was wrong)
+                          POST /instruct ──► QUEUED ────┐
+                                    │    (wrong, and here is why - go again)
+                                    │                   └──► back to the worker
                                     ▼
                               Audit log (every step above)
 ```
@@ -280,10 +282,43 @@ review has. Folding "I sorted it myself" into "reject" makes the agent look
 wrong far more often than it was, and that number is exactly what anyone
 deciding whether to trust it will look at first.
 
+### Correcting the agent instead of overruling it
+
+`POST /tickets/{id}/instruct` is not a fourth decision. The three above are
+verdicts and they close the ticket; an instruction says what the agent should
+have concluded and sends it round again:
+
+```bash
+curl -X POST http://localhost:8000/tickets/7/instruct -H "Content-Type: application/json"   -d '{"instruction": "This is a network fault, not an access one"}'
+```
+
+The correction is stored on the ticket, the ticket goes back to `QUEUED`, and
+the worker picks it up and produces a second `agent_runs` row. Both runs are
+kept, so "what it said" and "what it said once corrected" sit side by side.
+
+Two details in that path are worth more than the feature itself:
+
+- **The instruction goes outside the `<ticket>` fence.** The ticket is
+  untrusted text from a member of the public and is fenced so the model treats
+  it as data. An instruction comes from somebody already authorised to approve
+  the answer, so it is a genuine instruction and belongs on the trusted side of
+  that boundary. Putting it inside the fence would tell the model, correctly,
+  to ignore it. [`worker/tests/test_prompt.py`](worker/tests/test_prompt.py)
+  holds that line.
+- **The ticket is moved to `QUEUED` before it is republished.** The worker
+  refuses to re-analyse anything sitting in `AWAITING_APPROVAL` or `ESCALATED`,
+  because a duplicate queue message once cancelled a human review by quietly
+  re-running it. A deliberate re-run goes through that guard by moving the
+  ticket, not by weakening the guard.
+
+An instruction also works on an `ESCALATED` ticket, which is the way out of
+what used to be a dead end. It does not work on a `RESOLVED` one: somebody
+decided that, and quietly reopening it is not on offer.
+
 **Known rough edge:** after the last SLA chase at 480 minutes nothing chases
-again, and `ESCALATED` has no onward routing, so a ticket nobody acts on sits
-there indefinitely. The system is good at deciding when a person is needed and
-has nothing to say about whether one turned up.
+again, so a ticket nobody acts on still sits there indefinitely. The system is
+good at deciding when a person is needed and has nothing to say about whether
+one turned up.
 
 **Known rough edge:** the sensitive-topic check is naive substring matching, so
 a resolution saying "delete the saved credential entry" trips the `delete`
