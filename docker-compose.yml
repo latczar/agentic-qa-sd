@@ -58,6 +58,8 @@ services:
       # up. The API never sends a Telegram message itself.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
+      # The overseer's team view asks n8n whether it is up (/healthz only).
+      N8N_URL: ${N8N_URL:-http://n8n:5678}
     ports:
       - "8000:8000"
     depends_on:
