@@ -46,6 +46,12 @@ RETRIEVAL_MODE = os.environ.get("RETRIEVAL_MODE", "mcp")
 N8N_WEBHOOK_URL = os.environ.get("N8N_WEBHOOK_URL", "")
 N8N_WEBHOOK_TIMEOUT_SECONDS = float(os.environ.get("N8N_WEBHOOK_TIMEOUT_SECONDS", "5"))
 
+# Where n8n itself answers, for the overseer's team view. Only /healthz is ever
+# called: whether n8n is up is knowable without credentials, whereas which
+# workflows are active is not - that needs an n8n API key this project does not
+# hold, so the overseer says so instead of guessing.
+N8N_URL = os.environ.get("N8N_URL", "http://localhost:5679")
+
 
 # --- Telegram -------------------------------------------------------------
 #

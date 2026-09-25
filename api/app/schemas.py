@@ -224,3 +224,52 @@ class BoardOut(BaseModel):
     failed: list[OutcomeOut]
     solved_today: int
     solved_automatically_today: int
+
+
+# --- Overseer: the team and its routines ------------------------------------
+
+
+class TeamMemberOut(BaseModel):
+    """One member of the org chart.
+
+    `kind` keeps the chart honest: a person, an AI agent, a tool, a bot and an
+    automation are different things, and drawing them all as "employees"
+    would claim more than the system does.
+    """
+
+    key: str
+    name: str
+    kind: str
+    role: str
+    reports_to: str | None
+    state: str
+    status: str
+    facts: list[str]
+    tech: list[str]
+    last_active: datetime | None
+
+
+class RoutineOut(BaseModel):
+    """Recurring or triggered work, and the evidence that it actually ran.
+
+    `last_evidence` is the latest trace the routine left in our own data, not
+    a claim that it ran - n8n's own run history is out of reach without an API
+    key. `state` is "ok", "quiet" (it should have left a trace and has not),
+    or "unknown" (nothing here could show it either way).
+    """
+
+    key: str
+    name: str
+    owner: str
+    trigger: str
+    does: str
+    state: str
+    last_evidence: datetime | None
+    evidence: str | None
+    note: str | None
+    tech: list[str]
+
+
+class TeamOut(BaseModel):
+    members: list[TeamMemberOut]
+    routines: list[RoutineOut]
