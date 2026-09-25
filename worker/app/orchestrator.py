@@ -169,7 +169,9 @@ def run(
         )
     )
 
-    progress.emit("retrieved", slugs=[a.slug for a in articles])
+    # Titles as well as slugs: the overseer shows people "VPN connection failures",
+    # not "vpn-connection-failures", and only the worker has both to hand.
+    progress.emit("retrieved", slugs=[a.slug for a in articles], titles=[a.title for a in articles])
 
     prompt = build_prompt(ticket, articles, _known_service_names(db))
     progress.emit(
