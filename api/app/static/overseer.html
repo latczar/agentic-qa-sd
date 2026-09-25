@@ -22,6 +22,7 @@
   </div>
   <span class="live" id="live"><i></i><span id="live-text">Connecting…</span></span>
   <span class="spacer"></span>
+  <button class="btn send small" id="new-ticket-btn" type="button" title="Write a ticket and drop it in. Shortcut: N">+ New ticket</button>
   <label class="control">You are <select id="me" aria-label="Who is deciding"></select></label>
   <label class="switch" title="Pulses and animations. Off to begin with if your system asks for less motion.">
     <input type="checkbox" id="motion"><span class="knob"></span>Motion
@@ -38,8 +39,10 @@
 <main class="wrap">
 
   <section class="headline">
-    <div class="pet-wrap">
-      <button class="pet mood-content" id="pet" type="button" title="Pip's mood comes from the real system. Click to say hello.">
+    <div class="pet-wrap" id="pet-home">
+      <button class="pet-bed" id="pet-bed" type="button" aria-label="Bring Pip home" title="Bring Pip home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/></svg></button>
+      <div class="pet-float" id="pet-float">
+      <button class="pet mood-content" id="pet" type="button" title="Pip's mood comes from the real system. Click to say hello, drag to move or throw, scroll to resize, double-click to bring home.">
         <svg viewBox="0 0 80 80" aria-hidden="true">
           <ellipse class="shadow" cx="40" cy="74" rx="19" ry="3.5"/>
           <g class="body-g">
@@ -54,11 +57,17 @@
             <ellipse class="cheek" cx="56.5" cy="47" rx="3.6" ry="2.1"/>
             <path class="mouth" d="M34 48 Q40 53 46 48"/>
             <path class="sweat" d="M62 23c2.2 3.2 3.3 5.3 3.3 6.8a3.3 3.3 0 0 1-6.6 0c0-1.5 1.1-3.6 3.3-6.8z"/>
+            <g class="acc acc-bow"><path d="M40 63 L31.5 58 V68 Z M40 63 L48.5 58 V68 Z"/><circle cx="40" cy="63" r="2.4"/></g>
+            <g class="acc acc-headset"><path class="band" d="M17 34 C17 6 63 6 63 34"/><rect x="12.5" y="30" width="7" height="13" rx="3.5"/><rect x="60.5" y="30" width="7" height="13" rx="3.5"/><path class="boom" d="M16 42 C16 51 22 55 29.5 55"/><circle cx="31" cy="55" r="2.4"/></g>
+            <g class="acc acc-crown"><path d="M29 15 L31 4.5 L35.5 10 L40 2.5 L44.5 10 L49 4.5 L51 15 Z"/></g>
           </g>
           <text class="zzz" x="60" y="18">z</text>
           <text class="zzz z2" x="66" y="11">z</text>
         </svg>
       </button>
+      <span class="pet-level" id="pet-level" hidden>Lv 1</span>
+      <span class="pet-grip" id="pet-grip" title="Drag to make Pip bigger or smaller" aria-hidden="true"></span>
+      </div>
     </div>
     <div class="say-wrap">
       <div class="say" id="say" aria-live="polite">Connecting…</div>
@@ -67,13 +76,17 @@
         <span id="pet-line">is waking up…</span>
       </div>
       <div class="pet-tally" id="pet-tally"></div>
+      <div class="pet-xp" id="pet-xp" title="Pip earns 10 XP for every ticket the desk has solved on its own, and 5 for every one solved with a person's help. Everyone sees the same level: it comes from the database."></div>
     </div>
     <div class="chips" id="chips"></div>
   </section>
-  <div class="try">
-    <span class="label">Try it, send a sample ticket:</span>
-    <span id="samples"></span>
-  </div>
+  <section class="tray" aria-labelledby="tray-title">
+    <div class="tray-head">
+      <h2 class="tray-title" id="tray-title">Drop a ticket in</h2>
+      <span class="tray-hint">Drag one onto the track, or click it. The samples are made up, each aimed at a real help article.</span>
+    </div>
+    <div class="tray-row" id="samples"></div>
+  </section>
 
   <nav class="tabs" role="tablist" aria-label="Views">
     <button role="tab" data-tab="floor" aria-selected="true" aria-controls="tab-floor">Floor <span class="count zero" id="needs-count" title="Tickets waiting for you">0</span></button>
@@ -83,13 +96,14 @@
 
   <!-- Floor --------------------------------------------------------------- -->
   <section id="tab-floor" role="tabpanel">
-    <div class="card">
+    <div class="card floor-card">
       <h2>The floor</h2>
       <p class="lead plain">Every ticket moves through these steps in order. At <b>Deciding</b> it is either solved on the spot, or it comes to you.</p>
       <p class="lead eng">Each stop is a step the worker really reports on the worker.progress exchange. Tokens move when an event arrives, never on a timer.</p>
 
       <div class="track" id="track">
         <svg class="wires" id="wires" aria-hidden="true"></svg>
+        <div class="slot" id="slot" aria-hidden="true"><span>Drop here</span></div>
 
         <div class="stop station" data-stop="queue">
           <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h5l1.5 2.5h5L16 13h5"/><path d="M5.5 6h13L21 13v6H3v-6z"/></svg><span class="name">Waiting</span></div>
@@ -130,7 +144,7 @@
         <div class="stop exit needs" data-stop="needs">
           <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></svg><span class="name">Needs you</span><span class="n" id="n-needs" title="Waiting for you">0</span></div>
           <ul class="recent" id="recent-needs"></ul>
-          <div class="go"><a href="#decide-title" id="go-decide">Decide below ↓</a></div>
+          <div class="go"><a href="#drawer" id="go-decide">Open to decide →</a></div>
           <div class="dock"></div>
         </div>
         <div class="stop exit failed" data-stop="failed">
@@ -144,15 +158,9 @@
       <div class="queues eng" id="queues"></div>
     </div>
 
-    <div class="floor-body">
-      <div>
-        <h2 class="section-title" id="decide-title">Needs you</h2>
-        <div class="decide" id="decide"><div class="empty">Loading…</div></div>
-      </div>
-      <div class="card">
-        <h2>What's happening</h2>
-        <ul class="feed" id="feed"></ul>
-      </div>
+    <div class="card floor-feed">
+      <h2>What's happening</h2>
+      <ul class="feed" id="feed"></ul>
     </div>
 
     <div class="card eng" style="margin-top:16px">
@@ -179,6 +187,40 @@
   </section>
 
 </main>
+
+<!-- Needs you: a drawer, so deciding happens beside the track rather than below it. -->
+<aside class="drawer" id="drawer" aria-labelledby="decide-title" inert>
+  <div class="drawer-head">
+    <h2 class="section-title" id="decide-title">Needs you</h2>
+    <button class="drawer-close" id="drawer-close" type="button" aria-label="Close Needs you" title="Close (Esc)">✕</button>
+  </div>
+  <div class="reworking" id="reworking" aria-live="polite"></div>
+  <div class="decide" id="decide"><div class="empty">Loading…</div></div>
+</aside>
+<button class="drawer-tab" id="drawer-tab" type="button" aria-controls="drawer" aria-expanded="false">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></svg><span>Needs you</span><span class="count zero" id="tab-count">0</span>
+</button>
+
+<!-- Write your own ticket. It goes in through POST /tickets like any other. -->
+<dialog class="sheet" id="new-ticket" aria-labelledby="nt-title">
+  <form id="nt-form" novalidate>
+    <div class="sheet-stub"><span>Service desk ticket</span><span id="nt-no">No. new</span></div>
+    <h2 id="nt-title">Write a ticket</h2>
+    <p class="sheet-lead">It goes in exactly like one from the console or Telegram, and you can watch it travel the track. <span id="nt-as"></span></p>
+    <label>What's the problem, in a line?
+      <input id="nt-subject" maxlength="200" autocomplete="off" placeholder="Outlook keeps asking for my password">
+    </label>
+    <label>Tell us more
+      <textarea id="nt-desc" rows="5" placeholder="What happened, and since when? What have you tried?"></textarea>
+    </label>
+    <p class="nt-error" id="nt-error" role="alert"></p>
+    <div class="row">
+      <span class="kbd-hint">Ctrl + Enter drops it in</span>
+      <button class="btn" type="button" id="nt-cancel">Cancel</button>
+      <button class="btn send" type="submit" id="nt-send">Drop it in</button>
+    </div>
+  </form>
+</dialog>
 
 <script src="/static/overseer.js"></script>
 </body>

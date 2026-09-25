@@ -99,6 +99,8 @@ header.top h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .0
   background: var(--panel-2); border: 1px solid var(--line); font-size: 13px; color: var(--muted); white-space: nowrap;
 }
 .chip b { color: var(--text); font-variant-numeric: tabular-nums; font-size: 14px; }
+button.chip { font: inherit; font-size: 13px; cursor: pointer; }
+button.chip:hover { border-color: var(--warn); }
 .chip.warn { border-color: var(--warn); background: var(--warn-soft); }
 .chip.warn b { color: var(--warn); }
 .chip.bad { border-color: var(--bad); background: var(--bad-soft); }
@@ -214,7 +216,7 @@ nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color:
 
 /* --- Floor body: decisions beside the feed ------------------------------- */
 
-.floor-body { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
+.floor-feed { margin-top: 16px; }
 
 .decide { display: grid; gap: 12px; }
 .ticket-card {
@@ -344,10 +346,26 @@ nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color:
 .routine .owner { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
 .routine .tech { margin-top: 8px; display: grid; gap: 3px; color: var(--muted); }
 
+/* The track sizes itself by the room it actually has, not by the window: with
+   the Needs you drawer docked, a wide window leaves a narrow floor. There the
+   captions go, the gaps tighten, and the names get the space. Below 640px the
+   stacked layout for phones takes over instead. */
+.floor-card { container: floor / inline-size; }
+@container floor (min-width: 640px) and (max-width: 940px) {
+  .track { column-gap: 14px; }
+  .stop { padding: 8px 8px 6px; min-height: 100px; }
+  .station .does { display: none; }
+  .stop .head { gap: 5px; align-items: flex-start; }
+  .stop .head svg { width: 16px; height: 16px; margin-top: 1px; }
+  .stop .name { font-size: 13px; line-height: 1.25; min-width: 0; overflow-wrap: anywhere; }
+  .exit { padding: 8px 10px; }
+  .exit .recent li { flex-wrap: wrap; gap: 0 6px; }
+  .exit .recent .what { flex-basis: 100%; }
+}
+
 /* --- Narrow screens ------------------------------------------------------ */
 
 @media (max-width: 980px) {
-  .floor-body { grid-template-columns: 1fr; }
   .routine { grid-template-columns: 1fr; gap: 6px; }
   .org ul.tree { flex-direction: column; align-items: center; padding-top: 18px; gap: 0; }
   .org li.node { padding-top: 18px; }
@@ -414,8 +432,9 @@ nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color:
 /* --- Pip, the desk pet ----------------------------------------------------- */
 
 .headline { position: relative; }
-.pet-wrap { flex: none; position: relative; width: 76px; height: 76px; }
-.pet { width: 76px; height: 76px; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 50%; }
+.pet-wrap { --pet-size: 76px; flex: none; position: relative; width: var(--pet-size); height: var(--pet-size); }
+.pet-float { position: relative; width: var(--pet-size); height: var(--pet-size); touch-action: none; }
+.pet { width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: grab; border-radius: 50%; touch-action: none; }
 .pet svg { width: 100%; height: 100%; overflow: visible; }
 .pet .shadow { fill: color-mix(in srgb, var(--text) 12%, transparent); }
 .pet .body, .pet .ear { fill: var(--pet, var(--accent)); transition: fill .6s; }
@@ -461,6 +480,62 @@ nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color:
 .pet-tally { font-size: 12.5px; color: var(--muted); }
 .pet-tally b { color: var(--text); font-variant-numeric: tabular-nums; }
 
+/* --- Playing with Pip ------------------------------------------------------ */
+
+.pet-float.floating { position: fixed; left: 0; top: 0; z-index: 60; }
+.pet-float.homing { transition: left .45s cubic-bezier(.2, .8, .2, 1), top .45s cubic-bezier(.2, .8, .2, 1); }
+.pet-float.held .pet { cursor: grabbing; }
+.pet-float.held .body-g { transform-origin: 40px 14px; animation: dangle .45s ease-in-out infinite alternate; }
+.pet-float.held .shadow { opacity: 0; }
+@keyframes dangle { from { transform: rotate(-6deg) scale(.96, 1.06); } to { transform: rotate(6deg) scale(.96, 1.06); } }
+.pet-float svg { transform-origin: 50% 90%; }
+.pet-float.bonk-x svg { animation: bonk-x .24s ease-out; }
+.pet-float.bonk-y svg { animation: bonk-y .24s ease-out; }
+.pet-float.landed svg { animation: land .42s ease-out; }
+.pet-float.giggle svg { animation: giggle .6s ease-in-out; }
+@keyframes bonk-x { 40% { transform: scale(.76, 1.16); } }
+@keyframes bonk-y { 40% { transform: scale(1.16, .76); } }
+@keyframes land { 30% { transform: scale(1.14, .84); } 65% { transform: scale(.95, 1.06); } }
+@keyframes giggle { 20% { transform: rotate(-9deg); } 40% { transform: rotate(8deg); } 60% { transform: rotate(-6deg); } 80% { transform: rotate(4deg); } }
+.pet-float.dizzy .eye { transform-box: fill-box; transform-origin: center; animation: spin .5s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.pet-bed {
+  position: absolute; inset: 0; display: none; place-items: center; padding: 0; cursor: pointer;
+  border-radius: 50%; border: 2px dashed var(--line); background: none; color: var(--muted);
+}
+.pet-wrap.away .pet-bed { display: grid; }
+.pet-bed:hover { border-color: var(--accent); color: var(--accent); }
+.pet-bed svg { width: 38%; height: 38%; }
+
+.pet-level {
+  position: absolute; right: -6px; bottom: 0; pointer-events: none;
+  font-size: 11px; font-weight: 800; padding: 1px 6px; border-radius: 999px; font-variant-numeric: tabular-nums;
+  background: var(--panel); border: 1px solid var(--line); color: var(--text);
+}
+.pet-grip {
+  position: absolute; right: -5px; top: -5px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--panel); border: 1px solid var(--line); cursor: nesw-resize; touch-action: none;
+  opacity: 0; transition: opacity .2s;
+}
+.pet-grip::after { content: ""; position: absolute; inset: 4px; border-top: 2px solid var(--muted); border-right: 2px solid var(--muted); }
+.pet-float:hover .pet-grip, .pet-float:focus-within .pet-grip, .pet-float.floating .pet-grip { opacity: 1; }
+
+.pet .acc { display: none; }
+.pet-float[data-unlocked~="headset"] .acc-headset,
+.pet-float[data-unlocked~="bow"] .acc-bow,
+.pet-float[data-unlocked~="crown"] .acc-crown { display: inline; }
+.acc-headset rect, .acc-headset circle { fill: var(--text); }
+.acc-headset .band { fill: none; stroke: var(--text); stroke-width: 3.2; stroke-linecap: round; }
+.acc-headset .boom { fill: none; stroke: var(--text); stroke-width: 2; stroke-linecap: round; }
+.acc-bow path { fill: #e5534b; } .acc-bow circle { fill: #b62324; }
+.acc-crown path { fill: #f2c94c; stroke: #b8860b; stroke-width: .9; stroke-linejoin: round; }
+
+.pet-xp { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); cursor: help; }
+.pet-xp:empty { display: none; }
+.pet-xp .xp-bar { width: 96px; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; flex: none; }
+.pet-xp .xp-bar i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .6s; }
+
 .fx { position: absolute; pointer-events: none; font-size: 14px; z-index: 5; animation: fx 1.2s ease-out forwards; }
 @keyframes fx { from { opacity: 1; transform: translate(0, 0) rotate(0); } to { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)); } }
 .confetti { width: 7px; height: 7px; border-radius: 2px; }
@@ -468,7 +543,144 @@ nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color:
 @media (max-width: 720px) {
   .track { padding-left: 0; padding-top: 26px; }
   .inlet-label { writing-mode: horizontal-tb; transform: none; top: 0; left: 50%; translate: -50% 0; }
-  .pet-wrap, .pet { width: 60px; height: 60px; }
+  .pet-wrap { --pet-size: 60px; }
+}
+
+/* --- Drop a ticket in ------------------------------------------------------ */
+
+.tray { margin-top: 12px; }
+.tray-head { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.tray-title { margin: 0; font-size: 14px; font-weight: 700; }
+.tray-hint { font-size: 12.5px; color: var(--muted); }
+.tray-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* A ticket: notched at both ends, with a perforated stub on the right. */
+.stub {
+  --stripe: var(--accent);
+  position: relative; display: grid; gap: 1px; text-align: left; min-width: 150px;
+  padding: 8px 46px 9px 18px; border: 1px solid var(--line); border-radius: 9px; color: var(--text);
+  background: linear-gradient(90deg, var(--stripe) 0 4px, var(--panel) 4px);
+  cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none;
+  -webkit-mask: radial-gradient(circle 7px at 0 50%, #0000 96%, #000) left / 51% 100% no-repeat,
+                radial-gradient(circle 7px at 100% 50%, #0000 96%, #000) right / 51% 100% no-repeat;
+  mask: radial-gradient(circle 7px at 0 50%, #0000 96%, #000) left / 51% 100% no-repeat,
+        radial-gradient(circle 7px at 100% 50%, #0000 96%, #000) right / 51% 100% no-repeat;
+  transition: transform .18s, border-color .18s, opacity .18s;
+}
+.stub::after { content: ""; position: absolute; top: 8px; bottom: 8px; right: 34px; border-left: 2px dashed var(--line); }
+.stub .stub-go { position: absolute; right: 12px; top: 50%; translate: 0 -50%; color: var(--muted); font-weight: 700; }
+.stub:hover { transform: translateY(-2px) rotate(-1.2deg); border-color: var(--stripe); }
+.stub:hover .stub-go { color: var(--stripe); }
+.stub:active { cursor: grabbing; }
+.stub:disabled { opacity: .5; cursor: default; transform: none; }
+.stub.lifted { opacity: .3; transform: none; }
+.stub.to-you { --stripe: var(--warn); }
+.stub.blank { --stripe: var(--ok); border-style: dashed; background: linear-gradient(90deg, var(--stripe) 0 4px, var(--panel-2) 4px); }
+.stub-kind { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.stub-subj { font-weight: 650; font-size: 14px; }
+.stub-hint { font-size: 12px; color: var(--warn); }
+.stub.shake { animation: shake .4s; }
+@keyframes shake { 25% { translate: -4px 0; } 75% { translate: 4px 0; } }
+
+/* The copy that follows the pointer, or flies into the slot. The shadow sits
+   on a wrapper because the ticket's notches are a mask, which would cut it off. */
+.fly { position: fixed; z-index: 70; pointer-events: none; filter: drop-shadow(0 12px 18px rgba(0, 0, 0, .25)); }
+.fly .stub { transform: rotate(3deg); }
+.fly.flying { transition: transform .5s cubic-bezier(.55, 0, .75, .2), opacity .5s ease-in; }
+.fly.returning { transition: transform .25s ease-out; }
+
+/* The slot at the start of the track that tickets go into. */
+.slot {
+  position: absolute; display: grid; place-items: center; pointer-events: none; border-radius: 8px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  transition: box-shadow .2s, background .2s, border-color .2s, transform .2s;
+}
+.slot span {
+  font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); white-space: nowrap;
+  writing-mode: vertical-rl; transform: rotate(180deg); opacity: 0; transition: opacity .2s;
+}
+.slot.ready { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 4px var(--accent-soft); }
+.slot.ready span { opacity: 1; }
+.slot.hot { transform: scale(1.15); box-shadow: 0 0 0 6px var(--accent-soft), 0 0 20px color-mix(in srgb, var(--accent) 60%, transparent); }
+.slot.gulp { animation: gulp .45s ease-out; }
+@keyframes gulp { 30% { transform: scale(1.3, .82); box-shadow: 0 0 0 9px var(--accent-soft); } }
+.track.drop-hot { outline: 2px dashed var(--accent); outline-offset: 4px; }
+
+/* --- Write a ticket --------------------------------------------------------- */
+
+.btn.small { padding: 6px 11px; font-size: 13px; }
+dialog.sheet { border: 0; padding: 0; background: transparent; color: var(--text); width: min(520px, calc(100vw - 32px)); overflow: visible; }
+dialog.sheet::backdrop { background: rgba(10, 12, 16, .5); }
+dialog.sheet form { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 0 20px 18px; box-shadow: 0 24px 60px rgba(0, 0, 0, .3); }
+dialog.sheet[open] form { animation: sheet-in .22s ease-out; }
+@keyframes sheet-in { from { transform: translateY(12px) scale(.98); opacity: 0; } }
+.sheet-stub {
+  display: flex; justify-content: space-between; gap: 12px; margin: 0 -20px 16px; padding: 10px 20px;
+  border-bottom: 2px dashed var(--line); border-radius: 14px 14px 0 0;
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+  background: linear-gradient(90deg, var(--accent) 0 5px, var(--panel-2) 5px);
+}
+dialog.sheet h2 { margin: 0; font-size: 19px; }
+.sheet-lead { color: var(--muted); font-size: 13.5px; margin: 4px 0 4px; }
+dialog.sheet label { display: grid; gap: 5px; font-size: 13px; font-weight: 600; margin-top: 12px; }
+dialog.sheet input, dialog.sheet textarea {
+  width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2);
+  font-size: 15px; font-weight: 400; resize: vertical;
+}
+dialog.sheet .row { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
+.kbd-hint { margin-right: auto; font-size: 12px; color: var(--muted); }
+.nt-error { color: var(--bad); font-size: 13.5px; margin: 10px 0 0; }
+.nt-error:empty { display: none; }
+
+/* --- Needs you drawer ------------------------------------------------------- */
+
+:root { --drawer-w: 440px; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(var(--drawer-w), 100vw); z-index: 40;
+  display: flex; flex-direction: column; background: var(--bg); border-left: 1px solid var(--line);
+  box-shadow: -14px 0 36px rgba(0, 0, 0, .14);
+  transform: translateX(100%); visibility: hidden;
+  transition: transform .28s cubic-bezier(.2, .8, .2, 1), visibility 0s linear .28s;
+}
+.drawer.open { transform: none; visibility: visible; transition: transform .28s cubic-bezier(.2, .8, .2, 1); }
+.drawer-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.drawer-head .section-title { margin: 0; flex: 1; flex-wrap: wrap; }
+.drawer-close {
+  width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2);
+  cursor: pointer; font-size: 14px; color: var(--muted);
+}
+.drawer-close:hover { color: var(--text); border-color: var(--muted); }
+.drawer .decide { flex: 1; overflow-y: auto; padding: 14px 16px 28px; align-content: start; }
+.reworking { display: grid; gap: 8px; padding: 14px 16px 0; }
+.reworking:empty { display: none; }
+.rework {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; font-size: 13.5px; line-height: 1.4;
+  border: 1px dashed var(--accent); border-radius: 10px; background: var(--accent-soft);
+}
+.rework .spin { width: 14px; height: 14px; margin-top: 3px; flex: none; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; animation: spin .8s linear infinite; }
+
+.drawer-tab {
+  position: fixed; right: 16px; bottom: 16px; z-index: 39; display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  font-weight: 650; font-size: 14px; cursor: pointer; box-shadow: 0 6px 20px rgba(0, 0, 0, .16);
+}
+.drawer-tab svg { width: 18px; height: 18px; color: var(--muted); }
+.drawer-tab.has { border-color: var(--warn); box-shadow: 0 6px 20px rgba(0, 0, 0, .16), 0 0 0 3px var(--warn-soft); }
+.drawer-tab.has svg { color: var(--warn); }
+.drawer-tab.nudge { animation: nudge .8s ease-in-out 2; }
+@keyframes nudge { 20% { transform: translateY(-7px) rotate(-3deg); } 40% { transform: translateY(0) rotate(2deg); } 60% { transform: translateY(-3px); } }
+body.drawer-open .drawer-tab { display: none; }
+
+/* Wide screens: the drawer docks and the page makes room, so you can watch
+   the track and decide at the same time. Narrower, it slides over the page. */
+@media (min-width: 1200px) {
+  body { transition: padding-right .28s cubic-bezier(.2, .8, .2, 1); }
+  body.drawer-open { padding-right: var(--drawer-w); }
+}
+@media (max-width: 720px) {
+  .slot span { writing-mode: horizontal-tb; transform: none; }
+  .drawer-tab { right: 12px; bottom: 12px; }
 }
 
 /* A still page when motion is off: no pulses, no bouncing, no breathing. The

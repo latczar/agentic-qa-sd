@@ -25,7 +25,10 @@ async function api(path, options) {
   const res = await fetch(path, options);
   if (!res.ok) {
     let detail = res.statusText;
-    try { detail = (await res.json()).detail ?? detail; } catch {}
+    try {
+      const d = (await res.json()).detail ?? detail;
+      detail = Array.isArray(d) ? d.map((x) => x.msg || String(x)).join("; ") : d;
+    } catch {}
     const err = new Error(detail);
     err.status = res.status;
     throw err;
@@ -106,7 +109,11 @@ const state = {
   queues: null,
   brokerWorkers: null,
   feed: [],             // kept so the feed can be redrawn when the view changes
-  decided: new Map(),   // ticket id -> time, so a just-decided card is not re-added by a stale poll
+  // Ticket id -> { since, at }: the waiting period that was just decided, so a
+  // stale poll cannot bring that card back. Only that period: a ticket sent
+  // back to the AI that returns needing you has a new waiting_since, and shows.
+  decided: new Map(),
+  reworking: new Map(), // ticket id -> { subject, at }: sent back to the AI, not back yet
 };
 
 const engineer = () => document.body.classList.contains("engineer");
@@ -376,6 +383,9 @@ function layoutWires() {
   const inlet = q.l > 14
     ? { d: `M6,${q.cy} L${q.l - 3},${q.cy}`, x: 6, y: q.cy }
     : { d: `M${q.cx},6 L${q.cx},${q.t - 3}`, x: q.cx, y: 6 };
+  Object.assign($("#slot").style, q.l > 14
+    ? { left: "-4px", top: `${q.cy - 34}px`, width: "22px", height: "68px" }
+    : { left: `${q.cx - 40}px`, top: "-2px", width: "80px", height: "18px" });
   const svg = $("#wires");
   svg.setAttribute("viewBox", `0 0 ${t.width} ${t.height}`);
   svg.innerHTML =
@@ -509,7 +519,7 @@ function drawChips() {
   if (q["ticket.processing"]) chips.push(`<span class="chip"><b>${q["ticket.processing"].messages}</b> in line</span>`);
   if (q["ticket.retry"]?.messages) chips.push(`<span class="chip warn"><b>${q["ticket.retry"].messages}</b> trying again</span>`);
   if (b) {
-    chips.push(`<span class="chip ${b.waiting.length ? "warn" : ""}"><b>${b.waiting.length}</b> need${b.waiting.length === 1 ? "s" : ""} you</span>`);
+    chips.push(`<button type="button" class="chip ${b.waiting.length ? "warn" : ""}" data-open-drawer title="Open Needs you"><b>${b.waiting.length}</b> need${b.waiting.length === 1 ? "s" : ""} you</button>`);
     chips.push(`<span class="chip"><b>${b.solved_today}</b> solved today${b.solved_today ? ` (${b.solved_automatically_today} on its own)` : ""}</span>`);
   }
   $("#chips").innerHTML = chips.join("");
@@ -543,6 +553,14 @@ async function refreshBoard() {
   drawDecide();
   drawChips();
   drawHeadline();
+  drawLevel();
+  // First visit on a wide screen: if something is waiting, start with the
+  // drawer open beside the track. After that, it stays how you left it.
+  if (!state.drawerChosen) {
+    state.drawerChosen = true;
+    const saved = prefs.get("overseer.drawer");
+    if (DOCKS.matches && (saved === "open" || (saved == null && state.board.waiting.length))) setDrawer(true, { remember: false });
+  }
   if (teamVisible()) drawTeam();
   layoutTrack();
 }
@@ -570,13 +588,24 @@ function drawExits() {
   const newest = [...b.waiting].sort((a, z) => new Date(z.waiting_since) - new Date(a.waiting_since)).slice(0, 2);
   $("#recent-needs").innerHTML = newest.map((w) =>
     `<li title="${esc(w.subject)}"><a href="#decide-title" class="what" data-card="${w.id}">#${w.id} ${esc(w.subject)}</a><span class="when">${esc(waited(w.waiting_since))}</span></li>`).join("");
-  $("#go-decide").textContent = b.waiting.length ? "Decide below ↓" : "Nothing waiting";
+  $("#go-decide").textContent = b.waiting.length ? "Open to decide →" : "Nothing waiting";
   $("#recent-failed").innerHTML = b.failed.length
     ? b.failed.slice(0, 2).map((o) => `<li title="${esc(o.subject)}"><span class="what">#${o.id} ${esc(o.subject)}</span><span class="when">${ago(o.at)}</span></li>`).join("")
     : `<li class="muted">Nothing has failed</li>`;
   const count = $("#needs-count");
   count.textContent = b.waiting.length;
   count.classList.toggle("zero", !b.waiting.length);
+  // The drawer's tab: a count, and a nudge when something new arrives while
+  // the drawer is shut. It never opens itself: that would be the page deciding
+  // what you look at.
+  const n = b.waiting.length;
+  $("#tab-count").textContent = n;
+  $("#tab-count").classList.toggle("zero", !n);
+  const tab = $("#drawer-tab");
+  tab.classList.toggle("has", n > 0);
+  tab.setAttribute("aria-label", `Needs you: ${plural(n, "ticket")} waiting`);
+  if (state.lastWaiting != null && n > state.lastWaiting && !$("#drawer").classList.contains("open")) retrigger(tab, "nudge");
+  state.lastWaiting = n;
 }
 
 // How sure the AI must be, with evidence, before Approve becomes the button
@@ -642,8 +671,16 @@ function cardHtml(w) {
 // poll. One is only redrawn if its ticket changed and nobody is using it.
 function drawDecide() {
   const list = $("#decide");
-  const waiting = (state.board?.waiting || []).filter((w) => !state.decided.has(w.id));
+  const board = state.board;
+  const waiting = (board?.waiting || []).filter((w) => !isDecided(w));
   const want = new Set(waiting.map((w) => String(w.id)));
+
+  // A ticket that was sent back is off the list of things in progress once it
+  // is waiting again, solved, failed, or has been gone a long time.
+  for (const [id, r] of state.reworking) {
+    const settled = [...(board?.solved || []), ...(board?.failed || [])].some((o) => o.id === id && new Date(o.at) > r.at);
+    if (want.has(String(id)) || settled || Date.now() - r.at > 10 * 60000) state.reworking.delete(id);
+  }
 
   $("#decide-title").innerHTML = `Needs you <span class="count ${waiting.length ? "" : "zero"}">${waiting.length}</span>${waiting.length > 1 ? ` <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500">longest waiting first</span>` : ""}`;
 
@@ -655,6 +692,8 @@ function drawDecide() {
   let prev = null;
   for (const w of waiting) {
     let card = $(`.ticket-card[data-id="${w.id}"]`, list);
+    // Back already, while the old card is still saying goodbye: the new one wins.
+    if (card?.dataset.done && card.dataset.since !== w.waiting_since) { card.remove(); card = null; }
     const sig = JSON.stringify([w.reason, w.suggestion, w.confidence, w.steered_by, w.waiting_since]);
     if (!card) {
       card = document.createElement("article");
@@ -667,6 +706,7 @@ function drawDecide() {
       card.innerHTML = cardHtml(w);
     }
     card.dataset.sig = sig;
+    card.dataset.since = w.waiting_since;
     const where = prev ? prev.nextSibling : list.firstChild;
     if (where !== card) list.insertBefore(card, where);
     prev = card;
@@ -677,13 +717,31 @@ function drawDecide() {
   if (!$(".ticket-card", list)) {
     list.innerHTML = `<div class="empty">Nothing needs you right now. When the AI isn't sure, or a ticket is sensitive, it lands here with the AI's suggestion and the reason.</div>`;
   }
+
+  // Sent back and not back yet. Not while its own card is still on screen.
+  $("#reworking").innerHTML = [...state.reworking]
+    .filter(([id]) => !$(`.ticket-card[data-id="${id}"]`, list))
+    .map(([id, r]) => `<div class="rework"><span class="spin" aria-hidden="true"></span><span><b>#${id} ${esc(r.subject)}</b><br><span class="muted">Back with the AI after your correction. If it still needs you, it comes back here.</span></span></div>`)
+    .join("");
+}
+
+function isDecided(w) {
+  const d = state.decided.get(w.id);
+  if (!d) return false;
+  // Without a waiting time to compare, fall back to a short blanket hide.
+  return d.since ? d.since === w.waiting_since : Date.now() - d.at < 20000;
+}
+
+function markDecided(id) {
+  const w = (state.board?.waiting || []).find((x) => x.id === id);
+  state.decided.set(id, { since: w?.waiting_since ?? null, at: Date.now() });
 }
 
 const OUTCOME = {
   approve: (id) => `✓ Approved. #${id} is solved.`,
   handled: (id) => `Noted: you're handling #${id} yourself. It's marked solved, and the AI isn't blamed.`,
   reject: (id) => `#${id} has gone to someone else.`,
-  instruct: (id) => `Sent #${id} back to the AI with your correction. Watch it go round again above.`,
+  instruct: (id) => `Sent #${id} back to the AI with your correction. Watch it go round on the track.`,
 };
 const YOU_DID = {
   approve: (id) => `You approved the AI's suggestion for #${id}`,
@@ -747,7 +805,11 @@ $("#decide").addEventListener("click", async (ev) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    state.decided.set(id, Date.now());
+    markDecided(id);
+    if (act === "instruct") {
+      const w = (state.board?.waiting || []).find((x) => x.id === id);
+      state.reworking.set(id, { subject: w?.subject || "", at: Date.now() });
+    }
     settle(card, OUTCOME[act](id), "ok");
     pushFeed({ at: new Date().toISOString(), you: YOU_DID[act](id) });
     if (act === "instruct") handoff("you", "triage", { tone: "" });
@@ -755,7 +817,7 @@ $("#decide").addEventListener("click", async (ev) => {
     if (act === "approve" || act === "handled") celebrate(`says thanks: #${id} is sorted.`);
   } catch (err) {
     if (err.status === 409) {
-      state.decided.set(id, Date.now());
+      markDecided(id);
       settle(card, "Someone has already decided this one.", "");
     } else {
       $$("button", card).forEach((b) => { b.disabled = false; });
@@ -807,7 +869,7 @@ function plainLine(e) {
     }
     case "finished":
       if (d.status === "RESOLVED") return [`Done. ${t} is solved`, "ok"];
-      if (d.status === "AWAITING_APPROVAL") return [`Done. ${t} is waiting for you below`, "warn"];
+      if (d.status === "AWAITING_APPROVAL") return [`Done. ${t} is waiting for you in Needs you`, "warn"];
       return [`Done. ${t} is ${esc(lower(d.status))}`, ""];
     case "retry_scheduled": return [`Hit a problem, so it will try ${t} again in ${Math.round((d.delay_ms || 0) / 1000)} s`, "warn"];
     case "dead_lettered": return [`Couldn't finish ${e.ticket_id ? t : "a ticket"} after several tries`, "bad"];
@@ -1089,6 +1151,7 @@ const pet = {
 const MOUTH = {
   content: "M34 48 Q40 53 46 48",
   watching: "M37.6 49 Q40 52 42.4 49 Q40 46.4 37.6 49 Z",
+  held: "M37.4 49.8 a2.6 3 0 1 0 5.2 0 a2.6 3 0 1 0 -5.2 0",
   celebrating: "M33 46.5 Q40 57 47 46.5 Q40 49.5 33 46.5 Z",
   waiting: "M35.5 49.5 L44.5 49.5",
   worried: "M34 51 Q37 48 40 50 Q43 52 46 49",
@@ -1127,7 +1190,8 @@ function petMood() {
 function lookAtWork(mood) {
   const petEl = $("#pet");
   let dx = 0, dy = 0;
-  const target = busyLanes()[0]?.el || (mood === "worried" || mood === "waiting" ? $('[data-stop="needs"]') : null);
+  if (Date.now() < play.dizzyUntil) return; // the eyes are busy spinning
+  const target = pet.lookAt || busyLanes()[0]?.el || (mood === "worried" || mood === "waiting" ? $('[data-stop="needs"]') : null);
   if (target && target.offsetParent !== null) {
     const a = petEl.getBoundingClientRect(), b = target.getBoundingClientRect();
     const vx = b.left + b.width / 2 - (a.left + a.width / 2), vy = b.top + b.height / 2 - (a.top + a.height / 2);
@@ -1144,9 +1208,12 @@ function drawPet() {
   if (pet.mood !== mood) {
     el.classList.remove(`mood-${pet.mood}`);
     el.classList.add(`mood-${mood}`);
-    $(".mouth", el).setAttribute("d", MOUTH[mood]);
+    if (!$("#pet-float").classList.contains("held")) $(".mouth", el).setAttribute("d", MOUTH[mood]);
     pet.mood = mood;
   }
+  el.title = `${pet.name}'s mood comes from the real system. Click to say hello, drag to move or throw, scroll over ${pet.name} to resize, double-click to bring home.`;
+  $("#pet-bed").setAttribute("aria-label", `Bring ${pet.name} home`);
+  $("#pet-bed").title = `Bring ${pet.name} home`;
   $("#pet-line").textContent = line;
   const name = $("#pet-name");
   if (name && name.textContent !== pet.name) name.textContent = pet.name;
@@ -1159,7 +1226,8 @@ function drawPet() {
 
 function burst(kind) {
   if (calm()) return;
-  const wrap = $(".pet-wrap");
+  const wrap = $("#pet-float");
+  const size = petSize(), k = size / 76;
   const colours = ["var(--ok)", "var(--accent)", "var(--warn)", "#ff8fa3", "var(--info)"];
   const n = kind === "confetti" ? 16 : 1;
   for (let i = 0; i < n; i++) {
@@ -1168,20 +1236,20 @@ function burst(kind) {
       bit.className = "fx confetti";
       bit.style.background = colours[i % colours.length];
       const angle = (Math.PI * 2 * i) / n + Math.random() * 0.4;
-      const dist = 34 + Math.random() * 26;
+      const dist = (34 + Math.random() * 26) * k;
       bit.style.setProperty("--dx", `${Math.cos(angle) * dist}px`);
-      bit.style.setProperty("--dy", `${Math.sin(angle) * dist - 12}px`);
+      bit.style.setProperty("--dy", `${Math.sin(angle) * dist - 12 * k}px`);
       bit.style.setProperty("--rot", `${Math.round(Math.random() * 540 - 270)}deg`);
     } else {
       bit.className = "fx";
       bit.textContent = "♥";
       bit.style.color = "#ff6b8a";
-      bit.style.setProperty("--dx", `${Math.round(Math.random() * 16 - 8)}px`);
-      bit.style.setProperty("--dy", "-38px");
+      bit.style.setProperty("--dx", `${Math.round((Math.random() * 16 - 8) * k)}px`);
+      bit.style.setProperty("--dy", `${-38 * k}px`);
       bit.style.setProperty("--rot", "0deg");
     }
-    bit.style.left = "34px";
-    bit.style.top = "20px";
+    bit.style.left = `${size * 0.45}px`;
+    bit.style.top = `${size * 0.26}px`;
     wrap.appendChild(bit);
     setTimeout(() => bit.remove(), 1300);
   }
@@ -1200,11 +1268,17 @@ function celebrateIfSolved(e) {
 }
 
 $("#pet").addEventListener("click", () => {
+  if (play.suppressClick) return; // that was the end of a drag, not a click
   burst("heart");
-  const el = $("#pet");
-  el.classList.remove("hello");
-  void el.offsetWidth;
-  el.classList.add("hello");
+  retrigger($("#pet"), "hello");
+  // Five pokes in quick succession is a tickle.
+  const now = Date.now();
+  pet.pokes = (pet.pokes || []).filter((t) => now - t < 1500).concat(now);
+  if (pet.pokes.length >= 5) {
+    pet.pokes = [];
+    for (let i = 0; i < 6; i++) setTimeout(() => burst("heart"), i * 70);
+    retrigger($("#pet-float"), "giggle");
+  }
 });
 
 // Rename: click the name, type, Enter. Kept in this browser only.
@@ -1233,6 +1307,302 @@ $("#pet-name").addEventListener("click", () => {
   input.addEventListener("blur", () => done(true));
 });
 
+// --- Playing with Pip ------------------------------------------------------------
+//
+// Pip can be picked up, thrown, resized and sent home. None of it touches the
+// mood, which still only comes from the system: this is the fun part, and the
+// status light keeps working however far across the screen Pip has been thrown.
+
+const petFloat = $("#pet-float"), petHome = $("#pet-home"), petBtn = $("#pet");
+const PET_MIN = 48, PET_MAX = 240;
+const narrowScreen = matchMedia("(max-width: 720px)");
+const play = {
+  size: Number(prefs.get("overseer.petSize")) || null,
+  floating: false, x: 0, y: 0, raf: 0, hoverSince: 0, suppressClick: false, dizzyUntil: 0,
+};
+const petSize = () => play.size || (narrowScreen.matches ? 60 : 76);
+
+function retrigger(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth; // restart the animation
+  el.classList.add(cls);
+}
+
+function placePet() {
+  const s = petSize();
+  play.x = Math.min(Math.max(0, play.x), Math.max(0, innerWidth - s));
+  play.y = Math.min(Math.max(0, play.y), Math.max(0, innerHeight - s));
+  petFloat.style.left = `${play.x}px`;
+  petFloat.style.top = `${play.y}px`;
+}
+
+function liftPet() {
+  if (play.floating) return;
+  const r = petFloat.getBoundingClientRect();
+  play.x = r.left;
+  play.y = r.top;
+  play.floating = true;
+  petFloat.classList.add("floating");
+  petHome.classList.add("away");
+  placePet();
+}
+
+// Saved as fractions of the window, so a smaller window next time still has Pip on it.
+function savePetSpot() {
+  const s = petSize();
+  prefs.set("overseer.petSpot", JSON.stringify({
+    fx: play.x / Math.max(1, innerWidth - s), fy: play.y / Math.max(1, innerHeight - s),
+  }));
+}
+
+function dockPet() {
+  play.floating = false;
+  petFloat.classList.remove("floating", "homing");
+  petFloat.style.left = petFloat.style.top = "";
+  petHome.classList.remove("away");
+  prefs.remove("overseer.petSpot");
+  lookAtWork(pet.mood);
+}
+
+function sendPetHome() {
+  if (!play.floating) return;
+  cancelAnimationFrame(play.raf);
+  if (calm()) return dockPet();
+  const home = petHome.getBoundingClientRect();
+  petFloat.classList.add("homing");
+  petFloat.style.left = `${home.left}px`;
+  petFloat.style.top = `${home.top}px`;
+  setTimeout(() => { dockPet(); retrigger(petFloat, "landed"); }, 470);
+}
+
+function resizePet(n) {
+  const old = petSize();
+  const next = Math.round(Math.min(PET_MAX, Math.max(PET_MIN, n)));
+  if (next === old) return;
+  play.size = next;
+  petHome.style.setProperty("--pet-size", `${next}px`);
+  prefs.set("overseer.petSize", String(next));
+  if (play.floating) {
+    // Grow from the middle rather than the corner.
+    play.x -= (next - old) / 2;
+    play.y -= (next - old) / 2;
+    placePet();
+    savePetSpot();
+  }
+}
+
+function makeDizzy() {
+  play.dizzyUntil = Date.now() + 2400;
+  for (const p of $$(".pupil", petBtn)) p.style.transform = "translate(0px, 2.2px)";
+  petFloat.classList.add("dizzy");
+  setTimeout(() => { petFloat.classList.remove("dizzy"); lookAtWork(pet.mood); }, 2450);
+}
+
+// A throw: Pip slides with friction and bounces off the edges of the window.
+// With Motion off, Pip simply stays where dropped.
+function flingPet(vx, vy) {
+  cancelAnimationFrame(play.raf);
+  const peak = Math.hypot(vx, vy);
+  if (calm() || peak < 150) { retrigger(petFloat, "landed"); savePetSpot(); return; }
+  let last = performance.now(), bounces = 0;
+  const step = (now) => {
+    const dt = Math.min(0.032, (now - last) / 1000);
+    last = now;
+    const s = petSize(), maxX = innerWidth - s, maxY = innerHeight - s;
+    play.x += vx * dt;
+    play.y += vy * dt;
+    if (play.x < 0 || play.x > maxX) { play.x = Math.min(Math.max(play.x, 0), maxX); vx = -vx * 0.62; bounces++; retrigger(petFloat, "bonk-x"); }
+    if (play.y < 0 || play.y > maxY) { play.y = Math.min(Math.max(play.y, 0), maxY); vy = -vy * 0.62; bounces++; retrigger(petFloat, "bonk-y"); }
+    const keep = Math.pow(0.12, dt); // keeps 12% of its speed per second
+    vx *= keep;
+    vy *= keep;
+    placePet();
+    if (Math.hypot(vx, vy) > 40) { play.raf = requestAnimationFrame(step); return; }
+    retrigger(petFloat, "landed");
+    savePetSpot();
+    if (peak > 2600 || bounces >= 3) makeDizzy();
+  };
+  play.raf = requestAnimationFrame(step);
+}
+
+let grab = null;
+petBtn.addEventListener("pointerdown", (ev) => {
+  if (ev.button !== 0) return;
+  grab = { id: ev.pointerId, sx: ev.clientX, sy: ev.clientY, moved: false, trail: [] };
+  petBtn.setPointerCapture(ev.pointerId);
+});
+petBtn.addEventListener("pointermove", (ev) => {
+  if (!grab || ev.pointerId !== grab.id) return;
+  if (!grab.moved) {
+    // A few pixels of wobble is still a click.
+    if (Math.hypot(ev.clientX - grab.sx, ev.clientY - grab.sy) < 5) return;
+    grab.moved = true;
+    cancelAnimationFrame(play.raf);
+    liftPet();
+    grab.ox = grab.sx - play.x;
+    grab.oy = grab.sy - play.y;
+    petFloat.classList.add("held");
+    $(".mouth", petBtn).setAttribute("d", MOUTH.held);
+  }
+  play.x = ev.clientX - grab.ox;
+  play.y = ev.clientY - grab.oy;
+  placePet();
+  grab.trail.push([ev.clientX, ev.clientY, performance.now()]);
+  if (grab.trail.length > 6) grab.trail.shift();
+});
+function letGo(ev) {
+  if (!grab || ev.pointerId !== grab.id) return;
+  const g = grab;
+  grab = null;
+  if (!g.moved) return;
+  play.suppressClick = true;
+  setTimeout(() => { play.suppressClick = false; }, 60);
+  petFloat.classList.remove("held");
+  $(".mouth", petBtn).setAttribute("d", MOUTH[pet.mood] || MOUTH.content);
+  const now = performance.now();
+  const recent = g.trail.filter((p) => now - p[2] < 90);
+  let vx = 0, vy = 0;
+  if (ev.type === "pointerup" && recent.length >= 2) {
+    const a = recent[0], b = recent[recent.length - 1];
+    const dt = Math.max(0.008, (b[2] - a[2]) / 1000);
+    vx = (b[0] - a[0]) / dt;
+    vy = (b[1] - a[1]) / dt;
+  }
+  flingPet(vx, vy);
+}
+petBtn.addEventListener("pointerup", letGo);
+petBtn.addEventListener("pointercancel", letGo);
+petBtn.addEventListener("dblclick", sendPetHome);
+$("#pet-bed").addEventListener("click", sendPetHome);
+
+// Scroll over Pip to resize - but only once the pointer has rested there, so
+// scrolling the page past Pip still scrolls the page.
+petFloat.addEventListener("pointerenter", () => { play.hoverSince = performance.now(); });
+petFloat.addEventListener("pointerleave", () => { play.hoverSince = 0; });
+// Also when Pip was dropped right under a pointer that never left.
+petFloat.addEventListener("pointermove", () => { if (!play.hoverSince) play.hoverSince = performance.now(); });
+petFloat.addEventListener("wheel", (ev) => {
+  if (!play.hoverSince || performance.now() - play.hoverSince < 350) return;
+  ev.preventDefault();
+  resizePet(petSize() * (ev.deltaY < 0 ? 1.08 : 1 / 1.08));
+}, { passive: false });
+
+// The corner handle, for touch screens and anyone without a scroll wheel.
+$("#pet-grip").addEventListener("pointerdown", (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  const grip = ev.currentTarget;
+  const start = { x: ev.clientX, y: ev.clientY, size: petSize() };
+  grip.setPointerCapture(ev.pointerId);
+  const move = (e) => resizePet(start.size + ((e.clientX - start.x) - (e.clientY - start.y)) * 0.7);
+  const up = () => {
+    grip.removeEventListener("pointermove", move);
+    grip.removeEventListener("pointerup", up);
+    grip.removeEventListener("pointercancel", up);
+  };
+  grip.addEventListener("pointermove", move);
+  grip.addEventListener("pointerup", up);
+  grip.addEventListener("pointercancel", up);
+});
+
+// The same, from the keyboard: arrows move, + and - resize, Home sends Pip home.
+petBtn.addEventListener("keydown", (ev) => {
+  const step = ev.shiftKey ? 80 : 24;
+  const move = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[ev.key];
+  if (move) {
+    ev.preventDefault();
+    liftPet();
+    play.x += move[0];
+    play.y += move[1];
+    placePet();
+    savePetSpot();
+  } else if (ev.key === "+" || ev.key === "=") {
+    ev.preventDefault();
+    resizePet(petSize() * 1.12);
+  } else if (ev.key === "-" || ev.key === "_") {
+    ev.preventDefault();
+    resizePet(petSize() / 1.12);
+  } else if (ev.key === "Home") {
+    ev.preventDefault();
+    sendPetHome();
+  }
+});
+
+addEventListener("resize", () => { if (play.floating) placePet(); });
+
+function restorePet() {
+  if (play.size) petHome.style.setProperty("--pet-size", `${play.size}px`);
+  let spot = null;
+  try { spot = JSON.parse(prefs.get("overseer.petSpot") || "null"); } catch {}
+  if (spot && Number.isFinite(spot.fx) && Number.isFinite(spot.fy)) {
+    liftPet();
+    const s = petSize();
+    play.x = spot.fx * (innerWidth - s);
+    play.y = spot.fy * (innerHeight - s);
+    placePet();
+  }
+}
+
+// --- Pip's level -------------------------------------------------------------------
+//
+// XP comes from every ticket the desk has ever solved, read from the database,
+// so everyone watching sees the same Pip. Solving one without a person is
+// worth more, because that is the thing the agent is for.
+
+const XP_ON_ITS_OWN = 10, XP_WITH_HELP = 5;
+const UNLOCKS = [
+  { level: 2, key: "headset", name: "a headset" },
+  { level: 4, key: "bow", name: "a bow tie" },
+  { level: 6, key: "crown", name: "a crown" },
+];
+const xpToReach = (n) => 25 * n * (n - 1); // level 2 at 50 XP, 3 at 150, 4 at 300...
+const levelAt = (xp) => Math.floor((1 + Math.sqrt(1 + (4 * xp) / 25)) / 2);
+
+function drawLevel() {
+  const b = state.board;
+  if (!b || b.solved_total == null) return;
+  const xp = b.solved_automatically_total * XP_ON_ITS_OWN + (b.solved_total - b.solved_automatically_total) * XP_WITH_HELP;
+  const level = levelAt(xp);
+  const from = xpToReach(level), to = xpToReach(level + 1);
+  const next = UNLOCKS.find((u) => u.level > level);
+  petFloat.dataset.unlocked = UNLOCKS.filter((u) => level >= u.level).map((u) => u.key).join(" ");
+  const badge = $("#pet-level");
+  badge.hidden = false;
+  badge.textContent = `Lv ${level}`;
+  $("#pet-xp").innerHTML =
+    `<span class="xp-bar"><i style="width:${Math.round(((xp - from) / (to - from)) * 100)}%"></i></span>` +
+    `<span>Level ${level} · ${to - xp} XP to level ${level + 1}${next ? ` · ${next.name} at level ${next.level}` : ""}</span>`;
+  if (pet.level != null && level > pet.level) {
+    const got = UNLOCKS.find((u) => u.level === level);
+    celebrate(`reached level ${level}${got ? ` and got ${got.name}` : ""}!`);
+  }
+  pet.level = level;
+}
+
+// --- Needs you drawer ----------------------------------------------------------
+
+const DOCKS = matchMedia("(min-width: 1200px)");
+
+function setDrawer(open, { remember = true, focus = false } = {}) {
+  const drawer = $("#drawer");
+  drawer.classList.toggle("open", open);
+  drawer.inert = !open;
+  document.body.classList.toggle("drawer-open", open);
+  $("#drawer-tab").setAttribute("aria-expanded", String(open));
+  if (remember) prefs.set("overseer.drawer", open ? "open" : "closed");
+  if (focus) (open ? $("#drawer-close") : $("#drawer-tab")).focus({ preventScroll: true });
+}
+
+$("#drawer-tab").addEventListener("click", () => setDrawer(true, { focus: true }));
+$("#drawer-close").addEventListener("click", () => setDrawer(false, { focus: true }));
+$("#drawer").addEventListener("keydown", (ev) => {
+  // Not from inside a text box: there, Escape belongs to what is being typed.
+  if (ev.key === "Escape" && !ev.target.closest("textarea, input")) setDrawer(false, { focus: true });
+});
+document.addEventListener("click", (ev) => {
+  if (ev.target.closest("[data-open-drawer]")) setDrawer(true, { focus: true });
+});
+
 // --- Tabs, view switch, identity, samples -------------------------------------
 
 function showTab(name) {
@@ -1257,7 +1627,8 @@ document.addEventListener("click", (ev) => {
 function showCard(id) {
   const card = $(`.ticket-card[data-id="${id}"]`);
   if (!card) return;
-  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  setDrawer(true);
+  card.scrollIntoView({ behavior: calm() ? "auto" : "smooth", block: "nearest" });
   card.classList.remove("arrived");
   void card.offsetWidth; // restart the animation
   card.classList.add("arrived");
@@ -1272,7 +1643,7 @@ $("#recent-needs").addEventListener("click", (ev) => {
 
 $("#go-decide").addEventListener("click", (ev) => {
   ev.preventDefault();
-  $("#decide-title").scrollIntoView({ behavior: "smooth", block: "start" });
+  setDrawer(true, { focus: true });
 });
 
 const motionBox = $("#motion");
@@ -1342,29 +1713,188 @@ const SAMPLES = [
   ["Laptop won't charge", "Laptop will not charge", "My laptop says plugged in, not charging, and the battery is down to 12%.", ""],
 ];
 
-$("#samples").innerHTML = SAMPLES.map(([label, , , hint], i) =>
-  `<button class="pill-btn" data-sample="${i}">${esc(label)}${hint ? ` <span class="hint">· ${esc(hint)}</span>` : ""}</button>`).join(" ");
+// --- Drop a ticket in ---------------------------------------------------------
+//
+// Tickets are cards in a tray. Drag one onto the track and the slot at the start
+// of the line swallows it, or click it. The blank one opens a form. Every way in
+// ends at POST /tickets, exactly like the console's form and the Telegram bot.
 
-$("#samples").addEventListener("click", async (ev) => {
-  const btn = ev.target.closest("[data-sample]");
-  if (!btn) return;
-  const [, subject, description] = SAMPLES[Number(btn.dataset.sample)];
-  btn.disabled = true;
+$("#samples").innerHTML = SAMPLES.map(([label, , , hint], i) =>
+  `<button class="stub${hint ? " to-you" : ""}" type="button" data-sample="${i}" title="Drag onto the track, or click">` +
+  `<span class="stub-kind">Sample</span><span class="stub-subj">${esc(label)}</span>` +
+  `${hint ? `<span class="stub-hint">${esc(hint)}</span>` : ""}<span class="stub-go" aria-hidden="true">→</span></button>`).join("") +
+  `<button class="stub blank" type="button" data-write title="Write your own ticket (N)">` +
+  `<span class="stub-kind">Your own</span><span class="stub-subj">✎ Write a ticket</span><span class="stub-go" aria-hidden="true">+</span></button>`;
+
+async function postTicket(subject, description) {
+  const t = await api("/tickets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ submitted_by_id: Number($("#me").value), subject, description }),
+  });
+  state.subjects.set(t.id, t.subject);
+  pet.lastWork = Date.now();
+  pushFeed({ at: new Date().toISOString(), you: `You dropped in #${t.id} “${subject}”` });
+  return t;
+}
+
+// A copy of the ticket flies from where it was into the slot. Only for the eye:
+// the ticket has already been sent, and with Motion off it simply goes in.
+function flyIn(fromRect, label) {
+  showTab("floor");
+  const slot = $("#slot");
+  const land = () => { retrigger(slot, "gulp"); travel("in", "queue", ""); };
+  if (calm() || !fromRect || !fromRect.width) return land();
+  const fly = document.createElement("div");
+  fly.className = "fly";
+  fly.innerHTML = `<div class="stub"><span class="stub-kind">Ticket</span><span class="stub-subj">${esc(label)}</span><span class="stub-go" aria-hidden="true">→</span></div>`;
+  Object.assign(fly.style, { left: `${fromRect.left}px`, top: `${fromRect.top}px`, width: `${Math.min(fromRect.width, 320)}px` });
+  document.body.append(fly);
+  const s = slot.getBoundingClientRect();
+  const dx = s.left + s.width / 2 - (fromRect.left + Math.min(fromRect.width, 320) / 2);
+  const dy = s.top + s.height / 2 - (fromRect.top + 24);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    fly.classList.add("flying");
+    fly.style.transform = `translate(${dx}px, ${dy}px) scale(.15) rotate(-10deg)`;
+    fly.style.opacity = "0.15";
+  }));
+  setTimeout(() => { fly.remove(); land(); }, 520);
+}
+
+async function useStub(stub, rect) {
+  if (stub.hasAttribute("data-write")) return openWriter();
+  const [, subject, description] = SAMPLES[Number(stub.dataset.sample)];
+  stub.disabled = true;
   try {
-    const t = await api("/tickets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submitted_by_id: Number($("#me").value), subject, description }),
-    });
-    state.subjects.set(t.id, t.subject);
-    pushFeed({ at: new Date().toISOString(), you: `You sent a sample ticket, #${t.id} “${subject}”` });
-    showTab("floor");
-    travel("in", "queue", "");
+    const t = await postTicket(subject, description);
+    flyIn(rect, `#${t.id} ${subject}`);
   } catch (err) {
     pushFeed({ at: new Date().toISOString(), you: `Couldn't send the sample: ${err.message}` });
+    retrigger(stub, "shake");
   } finally {
-    setTimeout(() => { btn.disabled = false; }, 800);
+    setTimeout(() => { stub.disabled = false; }, 800);
   }
+}
+
+const overTrack = (x, y) => {
+  const r = $("#track").getBoundingClientRect();
+  return x >= r.left - 12 && x <= r.right + 12 && y >= r.top - 12 && y <= r.bottom + 12;
+};
+
+let carry = null; // the ticket being dragged
+$("#samples").addEventListener("pointerdown", (ev) => {
+  const stub = ev.target.closest(".stub");
+  if (!stub || ev.button !== 0 || stub.disabled) return;
+  carry = { stub, id: ev.pointerId, sx: ev.clientX, sy: ev.clientY, moved: false };
+  stub.setPointerCapture(ev.pointerId);
+});
+$("#samples").addEventListener("pointermove", (ev) => {
+  if (!carry || ev.pointerId !== carry.id) return;
+  const dx = ev.clientX - carry.sx, dy = ev.clientY - carry.sy;
+  if (!carry.moved) {
+    if (Math.hypot(dx, dy) < 6) return;
+    carry.moved = true;
+    showTab("floor");
+    const r = carry.stub.getBoundingClientRect();
+    carry.fly = document.createElement("div");
+    carry.fly.className = "fly";
+    carry.fly.append(carry.stub.cloneNode(true));
+    Object.assign(carry.fly.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px` });
+    document.body.append(carry.fly);
+    carry.stub.classList.add("lifted");
+    $("#slot").classList.add("ready");
+    pet.lookAt = carry.fly; // Pip watches the ticket
+  }
+  carry.fly.style.transform = `translate(${dx}px, ${dy}px) rotate(${Math.max(-8, Math.min(8, dx / 40))}deg)`;
+  const over = overTrack(ev.clientX, ev.clientY);
+  $("#slot").classList.toggle("hot", over);
+  $("#track").classList.toggle("drop-hot", over);
+  lookAtWork(pet.mood);
+});
+function release(ev) {
+  if (!carry || ev.pointerId !== carry.id) return;
+  const c = carry;
+  carry = null;
+  $("#slot").classList.remove("ready", "hot");
+  $("#track").classList.remove("drop-hot");
+  pet.lookAt = null;
+  if (!c.moved) {
+    if (ev.type === "pointerup") useStub(c.stub, c.stub.getBoundingClientRect());
+    return;
+  }
+  const rect = c.fly.getBoundingClientRect();
+  if (ev.type === "pointerup" && overTrack(ev.clientX, ev.clientY)) {
+    c.fly.remove();
+    c.stub.classList.remove("lifted");
+    useStub(c.stub, rect);
+  } else {
+    // Dropped somewhere else: back to the tray, and nothing is sent.
+    c.fly.classList.add("returning");
+    c.fly.style.transform = "";
+    setTimeout(() => { c.fly.remove(); c.stub.classList.remove("lifted"); }, calm() ? 0 : 260);
+  }
+  lookAtWork(pet.mood);
+}
+$("#samples").addEventListener("pointerup", release);
+$("#samples").addEventListener("pointercancel", release);
+// Keyboard: Enter or Space on a ticket sends it (a pointer click is handled above).
+$("#samples").addEventListener("click", (ev) => {
+  if (ev.detail !== 0) return;
+  const stub = ev.target.closest(".stub");
+  if (stub && !stub.disabled) useStub(stub, stub.getBoundingClientRect());
+});
+
+// --- Write a ticket --------------------------------------------------------------
+
+const writer = $("#new-ticket");
+
+function openWriter() {
+  if (writer.open) return;
+  const me = $("#me").selectedOptions[0];
+  $("#nt-as").textContent = me ? `It will be sent as ${me.textContent}.` : "";
+  $("#nt-error").textContent = "";
+  writer.showModal();
+  $("#nt-subject").focus();
+}
+
+$("#new-ticket-btn").addEventListener("click", openWriter);
+$("#nt-cancel").addEventListener("click", () => writer.close());
+$("#nt-desc").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) $("#nt-form").requestSubmit();
+});
+$("#nt-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const subject = $("#nt-subject").value.trim();
+  const description = $("#nt-desc").value.trim();
+  const error = $("#nt-error");
+  if (!subject) { error.textContent = "Give it a one-line summary first."; $("#nt-subject").focus(); return; }
+  if (!description) { error.textContent = "Add a sentence or two about what's wrong."; $("#nt-desc").focus(); return; }
+  if (!$("#me").value) { error.textContent = "Pick who you are at the top of the page first."; return; }
+  const send = $("#nt-send");
+  send.disabled = true;
+  send.textContent = "Sending…";
+  error.textContent = "";
+  try {
+    const t = await postTicket(subject, description);
+    const rect = $("#nt-form").getBoundingClientRect();
+    writer.close();
+    $("#nt-form").reset();
+    flyIn(rect, `#${t.id} ${subject}`);
+  } catch (err) {
+    error.textContent = `That didn't go in: ${err.message}`;
+  } finally {
+    send.disabled = false;
+    send.textContent = "Drop it in";
+  }
+});
+
+// N for a new ticket, from anywhere that isn't a text box.
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "n" && ev.key !== "N") return;
+  if (ev.ctrlKey || ev.metaKey || ev.altKey || writer.open) return;
+  if (ev.target.closest?.("input, textarea, select, [contenteditable]")) return;
+  ev.preventDefault();
+  openWriter();
 });
 
 // --- The stream --------------------------------------------------------------
@@ -1393,6 +1923,7 @@ document.fonts?.ready.then(layoutTrack);
 applyMotion();
 applyTheme();
 applyEngineer();
+restorePet();
 drawFeed();
 loadPeople();
 connect();
@@ -1404,7 +1935,7 @@ setInterval(drawPet, 30000); // moods that depend on the clock, like a night-tim
 setInterval(refreshBoard, 5000);
 setInterval(refreshTeam, 15000);
 setInterval(refreshRecord, 3000);
-// Forget decided tickets after a while; by then every poll has caught up.
+// Forget decisions after a while; by then every poll has caught up.
 setInterval(() => {
-  for (const [id, at] of state.decided) if (Date.now() - at > 20000) state.decided.delete(id);
+  for (const [id, d] of state.decided) if (Date.now() - d.at > 60000) state.decided.delete(id);
 }, 5000);
