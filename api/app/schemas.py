@@ -224,6 +224,10 @@ class BoardOut(BaseModel):
     failed: list[OutcomeOut]
     solved_today: int
     solved_automatically_today: int
+    # All time, for the desk pet's level. It comes from here rather than from
+    # what one browser happened to watch, so everyone sees the same pet.
+    solved_total: int
+    solved_automatically_total: int
 
 
 # --- Overseer: the team and its routines ------------------------------------

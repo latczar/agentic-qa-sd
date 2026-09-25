@@ -230,3 +230,20 @@ def test_solved_tickets_say_whether_a_person_or_the_agent_solved_them(client, db
     assert decided[by_person.id] == "Priya Raman"
     assert board["solved_today"] == 2
     assert board["solved_automatically_today"] == 1
+
+
+def test_all_time_totals_count_every_solved_ticket_not_just_today(client, db_session):
+    _board_ticket(db_session, "last-week@example.com", TicketStatus.RESOLVED, waited=timedelta(days=6))
+    helped, person = _board_ticket(db_session, "helped@example.com", TicketStatus.RESOLVED, waited=timedelta(days=9))
+    db_session.add(Approval(ticket_id=helped.id, decision=ApprovalDecision.APPROVED, decided_by_id=person.id))
+    # Not solved, so neither counts, approval or not.
+    _board_ticket(db_session, "failed@example.com", TicketStatus.FAILED)
+    waiting, waiter = _board_ticket(db_session, "waiting@example.com", TicketStatus.AWAITING_APPROVAL)
+    db_session.add(Approval(ticket_id=waiting.id, decision=ApprovalDecision.APPROVED, decided_by_id=waiter.id))
+    db_session.commit()
+
+    board = client.get("/overseer/board").json()
+
+    assert board["solved_today"] == 0
+    assert board["solved_total"] == 2
+    assert board["solved_automatically_total"] == 1
