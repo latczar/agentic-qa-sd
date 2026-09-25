@@ -101,6 +101,11 @@ class Ticket(Base):
     source: Mapped[TicketSource] = mapped_column(
         SAEnum(TicketSource, name="ticket_source"), default=TicketSource.WEB, server_default="WEB"
     )
+    # The latest steer from a person: "wrong category, this is Network".
+    # Latest wins rather than accumulating, because a correction that has been
+    # superseded is noise in the prompt - the history lives in audit_logs,
+    # where it belongs, and every re-run still gets its own agent_runs row.
+    human_instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     priority: Mapped[Priority | None] = mapped_column(SAEnum(Priority, name="ticket_priority"), nullable=True)
     affected_service_id: Mapped[int | None] = mapped_column(ForeignKey("services.id"), nullable=True)

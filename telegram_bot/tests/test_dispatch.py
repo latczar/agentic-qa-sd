@@ -161,3 +161,22 @@ def test_an_update_that_blows_up_is_still_marked_as_seen(db_session, telegram, f
         pass
 
     assert db_session.query(ProcessedEvent).filter_by(event_id="tg-901").count() == 1
+
+
+def test_instruct_passes_the_correction_through(db_session, telegram, fake_api):
+    user = _linked_user(db_session, ALLOWED_CHAT)
+
+    handle_update(
+        db_session, telegram, fake_api, _message(ALLOWED_CHAT, "/instruct 42 it is a network fault")
+    )
+
+    assert fake_api.calls == [("instruct", 42, "it is a network fault", user.id)]
+
+
+def test_instruct_without_a_ticket_number_explains_itself(db_session, telegram, fake_api):
+    _linked_user(db_session, ALLOWED_CHAT)
+
+    handle_update(db_session, telegram, fake_api, _message(ALLOWED_CHAT, "/instruct fix it please"))
+
+    assert fake_api.calls == []
+    assert "/instruct 42" in telegram.sent[0]["text"]

@@ -88,3 +88,10 @@ class ServiceDeskApi:
             f"/tickets/{ticket_id}/{action}",
             {"decided_by_id": decided_by_id, "reason": reason},
         )
+
+    def instruct(self, ticket_id: int, instruction: str, instructed_by_id: int | None) -> ApiResult:
+        return self._request(
+            "POST",
+            f"/tickets/{ticket_id}/instruct",
+            {"instruction": instruction, "instructed_by_id": instructed_by_id},
+        )

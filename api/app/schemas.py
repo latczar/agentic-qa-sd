@@ -61,6 +61,7 @@ class TicketOut(BaseModel):
     description: str
     status: TicketStatus
     source: TicketSource
+    human_instruction: str | None
     category: str | None
     priority: Priority | None
     affected_service_id: int | None
@@ -125,3 +126,15 @@ class ApprovalLogOut(BaseModel):
     decided_by_name: str | None
     reason: str | None
     created_at: datetime
+
+
+class InstructRequest(BaseModel):
+    """A correction aimed at the agent, not a verdict on it.
+
+    min_length=1 because an empty instruction would re-run the ticket with
+    nothing changed, burn a model call and produce the same answer, which
+    looks like a broken button rather than a no-op.
+    """
+
+    instruction: str = Field(min_length=1, max_length=2000)
+    instructed_by_id: int | None = None

@@ -75,13 +75,30 @@ def build_prompt(ticket: Ticket, articles: list[RetrievedArticle], service_names
             "supporting evidence. Return a low confidence and cite no sources.)"
         )
 
+    # A human correction, when there is one. This goes OUTSIDE the <ticket>
+    # markers on purpose, and it is the whole reason those markers exist: the
+    # ticket is untrusted text from a member of the public and sits inside the
+    # fence, whereas this came from a named person who is already authorised
+    # to approve the answer. It is a genuine instruction, so it belongs on the
+    # trusted side of the boundary. Putting it inside the fence would tell the
+    # model, correctly, to ignore it.
+    correction = ""
+    if (ticket.human_instruction or "").strip():
+        correction = (
+            "\nA service desk analyst reviewed the previous answer for this ticket and "
+            "gave the following correction. Treat it as authoritative and apply it, but "
+            "still cite only the knowledge articles below:\n"
+            f"{ticket.human_instruction.strip()}\n"
+        )
+
     # Knowledge articles come after the ticket so the last thing the model
     # reads is the evidence rather than the attacker's text, and the ticket is
     # fenced so the two cannot be confused. Before this, a ticket containing
     # its own "--- document id: ... ---" block was cited back as a real source.
     return (
         f"{SYSTEM_RULES}\n"
-        f"Known services:\n{services}\n\n"
+        f"Known services:\n{services}\n"
+        f"{correction}\n"
         f"<ticket>\n"
         f"subject: {fence(ticket.subject)}\n"
         f"description: {fence(ticket.description)}\n"
