@@ -4,533 +4,174 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Overseer · AI Service Desk</title>
-<style>
-  :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --panel-2: #1e222b;
-    --line: #2a2f3a;
-    --text: #e6e8ec;
-    --muted: #9aa3b2;
-    --accent: #5b8def;
-    --ok: #3fb950;
-    --warn: #d29922;
-    --bad: #f85149;
-    --info: #58a6ff;
-  }
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) {
-      --bg: #f6f7f9; --panel: #fff; --panel-2: #f0f2f5; --line: #dce0e6;
-      --text: #1b1f27; --muted: #5b6472;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  header {
-    padding: 14px 16px; border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  }
-  header h1 { font-size: 17px; margin: 0; font-weight: 650; }
-  header .spacer { flex: 1; }
-  .live { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
-  .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); display: inline-block; }
-  .live.on i { background: var(--ok); animation: pulse 1.6s ease-in-out infinite; }
-  .live.off i { background: var(--bad); }
-  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
-
-  .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
-  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
-  .card .lead { color: var(--muted); font-size: 13px; margin: -4px 0 12px; }
-  .head-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-  .head-row h2 { margin: 0; flex: 1; }
-
-  /* The floor ------------------------------------------------------------- */
-  .lane { border: 1px solid var(--line); border-radius: 9px; padding: 12px; background: var(--panel-2); margin-top: 10px; transition: opacity .4s; }
-  .lane.quiet { opacity: .55; }
-  .lane-head { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 10px; flex-wrap: wrap; }
-  .lane-head b { color: var(--text); font-weight: 650; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
-  .track { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; padding-top: 46px; }
-  .station { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 8px 8px 9px; min-height: 64px; transition: border-color .3s, background .3s; }
-  .station .n { font-weight: 650; font-size: 13.5px; }
-  .station .d { color: var(--muted); font-size: 11.5px; line-height: 1.35; margin-top: 2px; }
-  .station.here { border-color: var(--accent); }
-  .station.here.warn { border-color: var(--warn); }
-  .station.here.bad { border-color: var(--bad); }
-  .station.here.ok { border-color: var(--ok); }
-  /* Connectors between stations, drawn in the gaps. */
-  .station { position: relative; }
-  .station:not(:last-child)::after {
-    content: ""; position: absolute; right: -6px; top: 50%; width: 6px; height: 2px; background: var(--line);
-  }
-  .token {
-    position: absolute; top: 0; height: 38px; width: calc((100% - 30px) / 6);
-    display: flex; align-items: center; gap: 7px; padding: 0 9px;
-    border-radius: 8px; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600;
-    transition: left .7s cubic-bezier(.2,.8,.2,1), background .3s;
-    overflow: hidden; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.25);
-  }
-  .token .face { width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,.9); flex: none; position: relative; }
-  .token .face::before, .token .face::after { content: ""; position: absolute; top: 6px; width: 3px; height: 3px; border-radius: 50%; background: var(--accent); }
-  .token .face::before { left: 5px; } .token .face::after { right: 5px; }
-  .token .what { overflow: hidden; text-overflow: ellipsis; }
-  .token.idle { background: var(--line); color: var(--muted); }
-  .token.idle .face::before, .token.idle .face::after { background: var(--muted); }
-  .token.thinking { animation: think 1.1s ease-in-out infinite; }
-  @keyframes think { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-3px) } }
-  .token.warn { background: var(--warn); }
-  .token.bad { background: var(--bad); }
-  .token.ok { background: var(--ok); }
-  .doing { margin-top: 10px; font-size: 14px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-  .doing .t { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
-  .nobody { color: var(--muted); padding: 18px 4px 6px; font-size: 14px; }
-
-  /* Broker queues --------------------------------------------------------- */
-  .queues { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-  .q { border: 1px solid var(--line); border-radius: 9px; padding: 12px; background: var(--panel-2); }
-  .q .name { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--muted); }
-  .q .num { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
-  .q .does { font-size: 12.5px; color: var(--muted); }
-  .q.warn { border-color: var(--warn); } .q.warn .num { color: var(--warn); }
-  .q.bad { border-color: var(--bad); } .q.bad .num { color: var(--bad); }
-
-  /* Feeds ----------------------------------------------------------------- */
-  .feeds { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .feed { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; }
-  .feed li { padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; display: grid; grid-template-columns: 62px 1fr; gap: 10px; }
-  .feed li:last-child { border-bottom: 0; }
-  .feed .at { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 1px; }
-  .feed .who { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
-  .feed li.fresh { animation: arrive .9s ease-out; }
-  @keyframes arrive { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } to { background: transparent; } }
-  .feed .warn { color: var(--warn); } .feed .bad { color: var(--bad); } .feed .ok { color: var(--ok); }
-  .empty { color: var(--muted); font-size: 13.5px; padding: 12px 0; }
-
-  /* Drop a ticket in ------------------------------------------------------ */
-  .drop { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .drop select, .drop button {
-    font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 7px;
-    border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer;
-  }
-  .drop button:hover { border-color: var(--accent); }
-  .drop button:disabled { opacity: .5; cursor: default; }
-  .drop .label { font-size: 13px; color: var(--muted); }
-
-  @media (max-width: 860px) {
-    .feeds, .queues { grid-template-columns: 1fr; }
-  }
-  @media (max-width: 640px) {
-    .station .d { display: none; }
-    .station { min-height: 44px; padding: 6px; }
-    .station .n { font-size: 12px; }
-    .token .what { display: none; }
-    .token { justify-content: center; padding: 0; }
-  }
-</style>
+<link rel="stylesheet" href="/static/overseer.css">
 </head>
 <body>
-<header>
-  <h1>Overseer</h1>
+
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h4l2.5-6 3 12 2.5-6h4"/></svg>
+    </span>
+    <h1>Service desk, live</h1>
+  </div>
   <span class="live" id="live"><i></i><span id="live-text">Connecting…</span></span>
-  <span class="live" id="workers"></span>
   <span class="spacer"></span>
-  <a href="/">← Console</a>
+  <label class="control">You are <select id="me" aria-label="Who is deciding"></select></label>
+  <label class="switch" title="Pulses and animations. Off to begin with if your system asks for less motion.">
+    <input type="checkbox" id="motion"><span class="knob"></span>Motion
+  </label>
+  <label class="switch" title="Show queue names, model details, raw reasons and the audit log">
+    <input type="checkbox" id="engineer"><span class="knob"></span>Engineer view
+  </label>
+  <a href="/">Console →</a>
 </header>
 
-<div class="wrap">
-  <section class="card">
-    <div class="head-row">
+<main class="wrap">
+
+  <section class="headline">
+    <div class="pet-wrap">
+      <button class="pet mood-content" id="pet" type="button" title="Pip's mood comes from the real system. Click to say hello.">
+        <svg viewBox="0 0 80 80" aria-hidden="true">
+          <ellipse class="shadow" cx="40" cy="74" rx="19" ry="3.5"/>
+          <g class="body-g">
+            <path class="body" d="M40 13c15.5 0 25.5 11.5 25.5 27.5C65.5 57 55.5 69 40 69S14.5 57 14.5 40.5C14.5 24.5 24.5 13 40 13z"/>
+            <path class="ear" d="M24 21l-4-9 9 5z"/><path class="ear" d="M56 21l4-9-9 5z"/>
+            <ellipse class="belly" cx="40" cy="52" rx="13" ry="10"/>
+            <g class="eyes">
+              <g class="eye"><ellipse class="white" cx="31" cy="37" rx="5.4" ry="6.2"/><circle class="pupil" cx="31" cy="38" r="2.7"/></g>
+              <g class="eye"><ellipse class="white" cx="49" cy="37" rx="5.4" ry="6.2"/><circle class="pupil" cx="49" cy="38" r="2.7"/></g>
+            </g>
+            <ellipse class="cheek" cx="23.5" cy="47" rx="3.6" ry="2.1"/>
+            <ellipse class="cheek" cx="56.5" cy="47" rx="3.6" ry="2.1"/>
+            <path class="mouth" d="M34 48 Q40 53 46 48"/>
+            <path class="sweat" d="M62 23c2.2 3.2 3.3 5.3 3.3 6.8a3.3 3.3 0 0 1-6.6 0c0-1.5 1.1-3.6 3.3-6.8z"/>
+          </g>
+          <text class="zzz" x="60" y="18">z</text>
+          <text class="zzz z2" x="66" y="11">z</text>
+        </svg>
+      </button>
+    </div>
+    <div class="say-wrap">
+      <div class="say" id="say" aria-live="polite">Connecting…</div>
+      <div class="pet-says" id="pet-says">
+        <button class="pet-name" id="pet-name" type="button" title="Click to rename">Pip</button>
+        <span id="pet-line">is waking up…</span>
+      </div>
+      <div class="pet-tally" id="pet-tally"></div>
+    </div>
+    <div class="chips" id="chips"></div>
+  </section>
+  <div class="try">
+    <span class="label">Try it, send a sample ticket:</span>
+    <span id="samples"></span>
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button role="tab" data-tab="floor" aria-selected="true" aria-controls="tab-floor">Floor <span class="count zero" id="needs-count" title="Tickets waiting for you">0</span></button>
+    <button role="tab" data-tab="team" aria-selected="false" aria-controls="tab-team">Team</button>
+    <button role="tab" data-tab="routines" aria-selected="false" aria-controls="tab-routines">Routines <span class="count" id="routines-count" hidden title="Routines that need a look">0</span></button>
+  </nav>
+
+  <!-- Floor --------------------------------------------------------------- -->
+  <section id="tab-floor" role="tabpanel">
+    <div class="card">
       <h2>The floor</h2>
-      <div class="drop">
-        <span class="label">Drop a ticket in as</span>
-        <select id="as" aria-label="Raise tickets as"></select>
-        <span id="presets"></span>
-      </div>
-    </div>
-    <div class="lead">Each worker is a token on a track of the real pipeline. It moves when the worker reports a step, not on a timer.</div>
-    <div id="floor"><div class="nobody">Waiting to hear from a worker…</div></div>
-  </section>
+      <p class="lead plain">Every ticket moves through these steps in order. At <b>Deciding</b> it is either solved on the spot, or it comes to you.</p>
+      <p class="lead eng">Each stop is a step the worker really reports on the worker.progress exchange. Tokens move when an event arrives, never on a timer.</p>
 
-  <section class="card">
-    <h2>Broker queues</h2>
-    <div class="lead">Read straight from RabbitMQ every two seconds.</div>
-    <div class="queues" id="queues"><div class="empty">Waiting for the broker…</div></div>
-  </section>
+      <div class="track" id="track">
+        <svg class="wires" id="wires" aria-hidden="true"></svg>
 
-  <section class="feeds">
-    <div class="card">
-      <h2>Live</h2>
-      <div class="lead">What the worker is doing, as it does it. Not stored anywhere.</div>
-      <ul class="feed" id="live-feed"><li class="empty" style="display:block">Nothing yet.</li></ul>
-    </div>
-    <div class="card">
-      <h2>Record</h2>
-      <div class="lead">The audit log. This only moves when a transaction commits, so a ticket's rows arrive together at the end.</div>
-      <ul class="feed" id="record-feed"><li class="empty" style="display:block">Loading…</li></ul>
-    </div>
-  </section>
-</div>
-
-<script>
-const $ = (s) => document.querySelector(s);
-
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-async function api(path, options) {
-  const res = await fetch(path, options);
-  if (!res.ok) {
-    let detail = res.statusText;
-    try { detail = (await res.json()).detail ?? detail; } catch {}
-    throw new Error(detail);
-  }
-  return res.json();
-}
-
-function clock(iso) {
-  const d = iso ? new Date(iso) : new Date();
-  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-// --- The pipeline, as stations ------------------------------------------
-//
-// Six stations, each a real step the worker reports. Nothing here moves
-// unless an event says it did.
-const STATIONS = [
-  ["queue",    "Queue",    "Waiting on ticket.processing"],
-  ["screen",   "Screen",   "Cheap checks before anything is spent"],
-  ["retrieve", "Retrieve", "Knowledge search, then the prompt"],
-  ["model",    "Model",    "Local LLM, validated, retried on bad JSON"],
-  ["gate",     "Gate",     "Plain rules decide: auto or a person"],
-  ["done",     "Done",     "Committed to the database"],
-];
-const STATION_INDEX = Object.fromEntries(STATIONS.map(([k], i) => [k, i]));
-
-const STATION_OF = {
-  heartbeat: "queue",
-  picked_up: "screen", screening: "screen",
-  screened_out: "gate",
-  retrieving: "retrieve", retrieved: "retrieve", prompt_built: "retrieve",
-  calling_model: "model", invalid_answer: "model", analysed: "model", run_failed: "model",
-  gate: "gate", notified: "gate",
-  finished: "done", skipped: "done", retry_scheduled: "done", dead_lettered: "done",
-};
-
-const TERMINAL = new Set(["finished", "skipped", "retry_scheduled", "dead_lettered"]);
-
-// How long a finished ticket stays at "Done" before the token walks back to
-// the queue. Long enough to read the outcome, short enough not to mislead.
-const LINGER_MS = 3500;
-
-// One plain sentence per step, and a tone for the colour. Every field that
-// came from the worker is escaped: the subject is whatever a member of the
-// public typed into the ticket form.
-function describe(e) {
-  const d = e.detail || {};
-  const t = e.ticket_id ? `#${e.ticket_id}` : "";
-  switch (e.step) {
-    case "picked_up":
-      return [`Picked up ${t} “${esc(d.subject)}”${d.retry_count ? ` (retry ${d.retry_count})` : ""}`, ""];
-    case "screening":
-      return ["Screening the ticket before spending anything on it", ""];
-    case "screened_out":
-      return [`Screened out before analysis: ${esc(d.reason)}. Straight to a person`, "warn"];
-    case "retrieving":
-      return [`Searching the knowledge base ${d.via === "mcp" ? "through the MCP server" : "in-process"}`, ""];
-    case "retrieved": {
-      const s = d.slugs || [];
-      return s.length
-        ? [`Found ${s.length}: ${s.map(esc).join(", ")}`, ""]
-        : ["Found nothing relevant. The model will be told it has no evidence", "warn"];
-    }
-    case "prompt_built":
-      return [`Built the prompt from ${d.articles} article${d.articles === 1 ? "" : "s"}${d.steered ? ", with a person's correction on the trusted side" : ""}`, ""];
-    case "calling_model":
-      return [`Asking ${esc(d.model || "the model")} (attempt ${d.attempt})`, ""];
-    case "invalid_answer":
-      return [`Attempt ${d.attempt} failed validation: ${esc(d.error)}${d.retrying ? ". Retrying with the error fed back" : ". Giving up"}`, "warn"];
-    case "analysed":
-      return [`Answer: ${esc(d.category)} / ${esc(d.priority)}, confidence ${Math.round((d.confidence ?? 0) * 100)}%`, ""];
-    case "gate":
-      return d.requires_human
-        ? [`Gate: needs a person. ${esc(d.reason)}`, "warn"]
-        : [`Gate: safe to recommend. ${esc(d.reason)}`, "ok"];
-    case "notified": {
-      const told = Object.entries(d.channels || {}).filter(([, ok]) => ok).map(([k]) => k);
-      return told.length ? [`Told ${told.map(esc).join(" and ")}`, ""] : ["No notification channel got through", "warn"];
-    }
-    case "finished":
-      return [`Done. ${t} is now ${esc(String(d.status || "").replace(/_/g, " "))}`, d.status === "RESOLVED" ? "ok" : d.status === "AWAITING_APPROVAL" ? "warn" : ""];
-    case "skipped":
-      return [`${t} is already ${esc(d.status)}. Not re-analysing`, ""];
-    case "retry_scheduled":
-      return [`Failed, will retry (attempt ${d.attempt}) in ${Math.round((d.delay_ms || 0) / 1000)}s`, "warn"];
-    case "dead_lettered":
-      return [`Gave up: ${esc(d.reason)}. Sent to the dead-letter queue`, "bad"];
-    case "run_failed":
-      return [`Run failed: ${esc(d.error)}`, "bad"];
-    default:
-      return [esc(e.step), ""];
-  }
-}
-
-// --- Workers ------------------------------------------------------------
-const workers = new Map();   // worker id -> lane state
-const subjects = new Map();  // ticket id -> subject, for tokens that joined mid-ticket
-
-function laneFor(id) {
-  if (!workers.has(id)) {
-    workers.set(id, { id, station: "queue", step: "heartbeat", tone: "", ticket: null,
-                      text: "Waiting for work", stepAt: Date.now(), lastSeen: Date.now(), linger: null });
-  }
-  return workers.get(id);
-}
-
-async function subjectOf(ticketId) {
-  if (!ticketId || subjects.has(ticketId)) return;
-  subjects.set(ticketId, "");
-  try {
-    const t = await api(`/tickets/${ticketId}`);
-    subjects.set(ticketId, t.subject);
-    drawFloor();
-  } catch {}
-}
-
-function onProgress(e) {
-  const lane = laneFor(e.worker);
-  lane.lastSeen = Date.now();
-
-  if (e.step === "heartbeat") {
-    // A heartbeat only comes from an idle worker, but it must not cut short
-    // the moment a finished ticket spends at "Done" being readable.
-    if (lane.linger) return drawFloor();
-    if (lane.step !== "heartbeat") {
-      Object.assign(lane, { station: "queue", step: "heartbeat", tone: "", ticket: null, text: "Waiting for work", stepAt: Date.now() });
-    }
-    return drawFloor();
-  }
-
-  if (e.step === "picked_up" && e.detail?.subject) subjects.set(e.ticket_id, e.detail.subject);
-  else subjectOf(e.ticket_id);
-
-  const [text, tone] = describe(e);
-  clearTimeout(lane.linger);
-  lane.linger = null;
-  Object.assign(lane, {
-    station: STATION_OF[e.step] || lane.station,
-    step: e.step,
-    tone,
-    ticket: e.ticket_id ?? lane.ticket,
-    text,
-    stepAt: Date.now(),
-  });
-
-  if (TERMINAL.has(e.step)) {
-    lane.linger = setTimeout(() => {
-      lane.linger = null;
-      Object.assign(lane, { station: "queue", step: "heartbeat", tone: "", ticket: null, text: "Waiting for work", stepAt: Date.now() });
-      drawFloor();
-    }, LINGER_MS);
-  }
-
-  addLive(e, text, tone);
-  drawFloor();
-}
-
-function tokenClass(lane) {
-  if (lane.step === "heartbeat") return "idle";
-  if (lane.step === "calling_model") return "thinking";
-  return lane.tone || "";
-}
-
-function drawFloor() {
-  const el = $("#floor");
-  if (!workers.size) {
-    el.innerHTML = `<div class="nobody">${
-      brokerWorkers === 0
-        ? "No worker is connected to <code>ticket.processing</code>. Start one with <code>docker compose up -d worker</code>."
-        : "Waiting to hear from a worker…"
-    }</div>`;
-    return;
-  }
-
-  el.innerHTML = [...workers.values()].map((lane) => {
-    const i = STATION_INDEX[lane.station] ?? 0;
-    const subject = lane.ticket ? subjects.get(lane.ticket) : "";
-    const holding = lane.ticket ? `#${lane.ticket}${subject ? " · " + esc(subject) : ""}` : "idle";
-    const quiet = Date.now() - lane.lastSeen > 60000;
-    const stations = STATIONS.map(([k, n, d], idx) => `
-      <div class="station ${idx === i ? "here " + esc(lane.tone) : ""}">
-        <div class="n">${esc(n)}</div><div class="d">${esc(d)}</div>
-      </div>`).join("");
-    // left: the token spans one station, and stations are separated by a 6px
-    // gap, so each step along is one station width plus one gap.
-    return `<div class="lane ${quiet ? "quiet" : ""}" data-worker="${esc(lane.id)}">
-      <div class="lane-head">Worker <b>${esc(lane.id.slice(0, 12))}</b><span class="seen"></span></div>
-      <div class="track">
-        <div class="token ${tokenClass(lane)}" style="left: calc(${i} * ((100% - 30px) / 6 + 6px))">
-          <span class="face"></span><span class="what">${holding}</span>
+        <div class="stop station" data-stop="queue">
+          <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h5l1.5 2.5h5L16 13h5"/><path d="M5.5 6h13L21 13v6H3v-6z"/></svg><span class="name">Waiting</span></div>
+          <div class="does plain">Waiting its turn</div>
+          <div class="does eng mono">ticket.processing</div>
+          <div class="dock"></div>
         </div>
-        ${stations}
+        <div class="stop station" data-stop="screen">
+          <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><span class="name">Checking</span></div>
+          <div class="does plain">Quick safety checks first</div>
+          <div class="does eng mono">rules.screen_ticket_text</div>
+          <div class="dock"></div>
+        </div>
+        <div class="stop station" data-stop="retrieve">
+          <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg><span class="name">Looking it up</span></div>
+          <div class="does plain">Searching the help articles</div>
+          <div class="does eng mono">MCP search_knowledge_base, then the prompt</div>
+          <div class="dock"></div>
+        </div>
+        <div class="stop station" data-stop="model">
+          <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3"/></svg><span class="name">Thinking</span></div>
+          <div class="does plain">The AI writes an answer</div>
+          <div class="does eng mono">Ollama, JSON checked by Pydantic, up to 3 tries</div>
+          <div class="dock"></div>
+        </div>
+        <div class="stop station" data-stop="gate">
+          <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21v-9M12 12L6.5 6.5M12 12l5.5-5.5"/><path d="M6 10.5V6h4.5M18 10.5V6h-4.5"/></svg><span class="name">Deciding</span></div>
+          <div class="does plain">Solve it, or ask a person?</div>
+          <div class="does eng mono">rules.evaluate: plain if/else</div>
+          <div class="dock"></div>
+        </div>
+
+        <div class="stop exit solved" data-stop="solved">
+          <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16.5 9"/></svg><span class="name">Solved</span><span class="n" id="n-solved" title="Solved today">0</span></div>
+          <ul class="recent" id="recent-solved"></ul>
+          <div class="dock"></div>
+        </div>
+        <div class="stop exit needs" data-stop="needs">
+          <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></svg><span class="name">Needs you</span><span class="n" id="n-needs" title="Waiting for you">0</span></div>
+          <ul class="recent" id="recent-needs"></ul>
+          <div class="go"><a href="#decide-title" id="go-decide">Decide below ↓</a></div>
+          <div class="dock"></div>
+        </div>
+        <div class="stop exit failed" data-stop="failed">
+          <div class="head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></svg><span class="name">Couldn't finish</span></div>
+          <ul class="recent" id="recent-failed"></ul>
+          <div class="dock"></div>
+        </div>
       </div>
-      <div class="doing"><span>${lane.text}</span><span class="t" data-since="${lane.stepAt}"></span></div>
-    </div>`;
-  }).join("");
-  tick();
-}
 
-// Timers are updated in place rather than by redrawing, so a token that is
-// mid-slide is not reset four times a second.
-function tick() {
-  for (const node of document.querySelectorAll(".doing .t")) {
-    const secs = Math.floor((Date.now() - Number(node.dataset.since)) / 1000);
-    node.textContent = secs >= 1 ? `${secs}s` : "";
-  }
-  for (const lane of workers.values()) {
-    const head = document.querySelector(`.lane[data-worker="${CSS.escape(lane.id)}"] .seen`);
-    if (!head) continue;
-    const quiet = Math.floor((Date.now() - lane.lastSeen) / 1000);
-    // Silence during a model call is expected: the worker's I/O loop is
-    // blocked for the duration and cannot send a heartbeat.
-    head.textContent = quiet > 20 && lane.step !== "calling_model" ? ` · not heard from for ${quiet}s` : "";
-  }
-}
-setInterval(tick, 500);
+      <div class="workers" id="workers"></div>
+      <div class="queues eng" id="queues"></div>
+    </div>
 
-// --- Broker queues ------------------------------------------------------
-const QUEUE_DOES = {
-  "ticket.processing": "Waiting for a free worker",
-  "ticket.retry": "Backing off after a failure, then straight back to processing",
-  "ticket.dead-letter": "Given up on. Where the ticket exists, it was marked FAILED",
-};
-let brokerWorkers = null;
+    <div class="floor-body">
+      <div>
+        <h2 class="section-title" id="decide-title">Needs you</h2>
+        <div class="decide" id="decide"><div class="empty">Loading…</div></div>
+      </div>
+      <div class="card">
+        <h2>What's happening</h2>
+        <ul class="feed" id="feed"></ul>
+      </div>
+    </div>
 
-function onQueues(list) {
-  const processing = list.find((q) => q.name === "ticket.processing");
-  brokerWorkers = processing ? processing.consumers : null;
-  $("#workers").textContent = brokerWorkers == null ? "" : `${brokerWorkers} worker${brokerWorkers === 1 ? "" : "s"} connected`;
+    <div class="card eng" style="margin-top:16px">
+      <h2>Record</h2>
+      <p class="lead">The audit log. It only moves when a transaction commits, so a ticket's rows arrive together at the end, all stamped with the moment its transaction began.</p>
+      <ul class="feed" id="record"></ul>
+    </div>
+  </section>
 
-  $("#queues").innerHTML = list.map((q) => {
-    let tone = "";
-    if (q.name === "ticket.dead-letter" && q.messages) tone = "bad";
-    else if (q.name === "ticket.retry" && q.messages) tone = "warn";
-    else if (q.name === "ticket.processing" && q.messages && !q.consumers) tone = "bad";
-    const extra = q.name === "ticket.processing"
-      ? ` · ${q.consumers} consumer${q.consumers === 1 ? "" : "s"}${q.messages && !q.consumers ? " · nobody is taking these" : ""}`
-      : "";
-    return `<div class="q ${tone}">
-      <div class="name">${esc(q.name)}</div>
-      <div class="num">${q.messages}</div>
-      <div class="does">${esc(QUEUE_DOES[q.name] || "")}${esc(extra)}</div>
-    </div>`;
-  }).join("");
-  if (!workers.size) drawFloor();
-}
+  <!-- Team ---------------------------------------------------------------- -->
+  <section id="tab-team" role="tabpanel" hidden>
+    <p class="lead plain" style="margin:0 0 16px">Everyone and everything that does the work, and who hands work to whom. Each one is a real part of the system, labelled as what it actually is.</p>
+    <p class="lead eng" style="margin:0 0 16px">Status comes from the database, credential-free health checks and the live stream. Where none of those can see something, the card says so.</p>
+    <div class="org" id="org">
+      <svg class="org-wires" id="org-wires" aria-hidden="true"></svg>
+      <div id="org-tree"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
 
-// --- Feeds --------------------------------------------------------------
-const LIVE_LIMIT = 80;
+  <!-- Routines ------------------------------------------------------------ -->
+  <section id="tab-routines" role="tabpanel" hidden>
+    <p class="lead" style="margin:0 0 16px">Work that happens on a schedule or when something triggers it. Each one is judged by the traces it leaves here: "Needs a look" means it should have left one and did not.</p>
+    <div class="routines" id="routines"><div class="empty">Loading…</div></div>
+  </section>
 
-function addLive(e, text, tone) {
-  const ul = $("#live-feed");
-  ul.querySelector(".empty")?.remove();
-  const li = document.createElement("li");
-  li.className = "fresh";
-  li.innerHTML = `<span class="at">${clock(e.at)}</span>
-    <span><span class="${esc(tone)}">${text}</span><br><span class="who">${esc(e.worker.slice(0, 12))}</span></span>`;
-  ul.prepend(li);
-  while (ul.children.length > LIVE_LIMIT) ul.lastElementChild.remove();
-}
+</main>
 
-let lastRecordId = 0;
-
-function recordText(r) {
-  const d = r.detail || {};
-  const t = r.ticket_id ? `#${r.ticket_id}` : "";
-  const bits = [];
-  if (d.reason) bits.push(esc(d.reason));
-  if (d.status) bits.push(esc(d.status));
-  if (d.slugs) bits.push(esc(d.slugs.join(", ") || "no articles"));
-  if (d.instruction) bits.push(`“${esc(d.instruction)}”`);
-  if (d.error) bits.push(esc(d.error));
-  return `<b>${t}</b> ${esc(r.event_type.replace(/_/g, " "))}${bits.length ? ` <span class="who">${bits.join(" · ")}</span>` : ""}`;
-}
-
-async function refreshRecord() {
-  let rows;
-  try { rows = await api("/overseer/recent?limit=60"); } catch { return; }
-  const ul = $("#record-feed");
-  if (!rows.length) { ul.innerHTML = `<li class="empty" style="display:block">No audit rows yet.</li>`; return; }
-  const newest = rows[0].id;
-  ul.innerHTML = rows.map((r) => `<li class="${r.id > lastRecordId && lastRecordId ? "fresh" : ""}">
-      <span class="at">${clock(r.created_at)}</span><span>${recordText(r)}</span></li>`).join("");
-  lastRecordId = newest;
-}
-
-// --- Dropping a ticket in -----------------------------------------------
-//
-// Synthetic tickets, each aimed at a real knowledge article so the run is
-// worth watching. The payroll one goes to a person whatever the model says,
-// because payroll is on the sensitive list - a good one to show the gate.
-const PRESETS = [
-  ["VPN drops", "VPN keeps dropping", "Since changing my password this morning the VPN disconnects every few minutes."],
-  ["Printer", "Printer queue is stuck", "Nothing I send to the second-floor printer comes out. The queue shows three jobs stuck."],
-  ["Payroll", "Payroll portal says access denied", "The payroll portal says access denied when I try to view my payslip."],
-  ["Charging", "Laptop will not charge", "My laptop says plugged in, not charging, and the battery is down to 12%."],
-];
-
-async function setUpDrop() {
-  try {
-    const users = await api("/users");
-    $("#as").innerHTML = users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join("");
-  } catch {}
-  $("#presets").innerHTML = PRESETS.map(([label], i) => `<button data-preset="${i}">${esc(label)}</button>`).join(" ");
-  $("#presets").addEventListener("click", async (ev) => {
-    const btn = ev.target.closest("button[data-preset]");
-    if (!btn) return;
-    const [, subject, description] = PRESETS[Number(btn.dataset.preset)];
-    btn.disabled = true;
-    try {
-      await api("/tickets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ submitted_by_id: Number($("#as").value), subject, description }),
-      });
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setTimeout(() => { btn.disabled = false; }, 800);
-    }
-  });
-}
-
-// --- The stream ---------------------------------------------------------
-function connect() {
-  const es = new EventSource("/overseer/stream");
-  const live = $("#live"), liveText = $("#live-text");
-
-  es.onopen = () => { live.className = "live on"; liveText.textContent = "Live"; };
-  es.onerror = () => { live.className = "live off"; liveText.textContent = "Reconnecting…"; };
-
-  es.addEventListener("progress", (m) => onProgress(JSON.parse(m.data)));
-  es.addEventListener("queues", (m) => onQueues(JSON.parse(m.data)));
-  es.addEventListener("unavailable", (m) => {
-    live.className = "live off";
-    liveText.textContent = JSON.parse(m.data).detail;
-  });
-}
-
-setUpDrop();
-connect();
-refreshRecord();
-// The record is the database, not the stream, so it is polled. Three seconds
-// is plenty: it only changes when a worker commits.
-setInterval(refreshRecord, 3000);
-</script>
+<script src="/static/overseer.js"></script>
 </body>
 </html>
