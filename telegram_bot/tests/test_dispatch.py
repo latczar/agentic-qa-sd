@@ -163,6 +163,15 @@ def test_an_update_that_blows_up_is_still_marked_as_seen(db_session, telegram, f
     assert db_session.query(ProcessedEvent).filter_by(event_id="tg-901").count() == 1
 
 
+def test_status_summarises_the_pipeline(db_session, telegram, fake_api):
+    _linked_user(db_session, ALLOWED_CHAT)
+
+    handle_update(db_session, telegram, fake_api, _message(ALLOWED_CHAT, "/status"))
+
+    assert fake_api.calls == [("overview",)]
+    assert "2 waiting on you." in telegram.sent[0]["text"]
+
+
 def test_instruct_passes_the_correction_through(db_session, telegram, fake_api):
     user = _linked_user(db_session, ALLOWED_CHAT)
 

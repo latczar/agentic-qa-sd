@@ -50,6 +50,14 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+      # Only for the console's health panel. Without it the API would check
+      # localhost:8080 inside its own container and report the MCP server as
+      # down while the worker was talking to it perfectly well.
+      MCP_SERVER_URL: ${MCP_SERVER_URL:-http://mcp-server:8080/mcp}
+      # Likewise read-only: the health panel reports whether Telegram is set
+      # up. The API never sends a Telegram message itself.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
     ports:
       - "8000:8000"
     depends_on:

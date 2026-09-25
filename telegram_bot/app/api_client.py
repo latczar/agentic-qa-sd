@@ -95,3 +95,6 @@ class ServiceDeskApi:
             f"/tickets/{ticket_id}/instruct",
             {"instruction": instruction, "instructed_by_id": instructed_by_id},
         )
+
+    def overview(self) -> ApiResult:
+        return self._request("GET", "/overview")

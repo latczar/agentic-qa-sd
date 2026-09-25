@@ -32,6 +32,7 @@ HELP = (
     "<b>Service desk</b>\n\n"
     "Send me any message and I will raise it as a ticket.\n\n"
     "/link you@example.com - tell me who you are\n"
+    "/status - what the pipeline is doing right now\n"
     "/instruct 42 this is a network fault - correct the agent and re-run ticket 42\n"
     "/help - this message"
 )
@@ -84,6 +85,21 @@ def _link(db: Session, chat_id: int, email: str) -> str:
         db.rollback()
         return "That account is already linked to a different Telegram chat."
     return f"Linked. I will file your tickets as {html.escape(user.name)}."
+
+
+def _status(api: ServiceDeskApi) -> str:
+    result = api.overview()
+    if not result.ok:
+        return f"Could not read the pipeline: {html.escape(result.detail)}"
+
+    lines = ["<b>Pipeline</b>", ""]
+    for stage in result.body.get("stages", []):
+        # Empty stages are noise, except the two worth seeing a zero for:
+        # "nothing waiting on you" and "nothing broken" are both answers.
+        if stage["count"] or stage["key"] in ("needs_you", "failed"):
+            lines.append(f"{stage['count']:>3}  {html.escape(stage['label'])}")
+    lines += ["", f"{result.body.get('needs_you', 0)} waiting on you."]
+    return "\n".join(lines)
 
 
 def _raise_ticket(db: Session, api: ServiceDeskApi, chat_id: int, text: str) -> str:
@@ -141,6 +157,8 @@ def _handle_message(db: Session, telegram: TelegramClient, api: ServiceDeskApi, 
         telegram.send_message(chat_id, HELP)
     elif command == "/link":
         telegram.send_message(chat_id, _link(db, chat_id, argument))
+    elif command == "/status":
+        telegram.send_message(chat_id, _status(api))
     elif command == "/instruct":
         telegram.send_message(chat_id, _instruct(db, api, chat_id, argument))
     elif command.startswith("/"):
