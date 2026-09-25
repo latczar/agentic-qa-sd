@@ -38,6 +38,7 @@ async function api(path, options) {
 const prefs = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  remove(k) { try { localStorage.removeItem(k); } catch {} },
 };
 
 // --- Words ---------------------------------------------------------------
@@ -1286,6 +1287,27 @@ motionBox.addEventListener("change", () => {
 });
 systemCalm.addEventListener?.("change", applyMotion);
 
+// Light or dark follows the system until the viewer picks one. Picking the one
+// the system already uses goes back to following it. The <head> applies a saved
+// choice before the first paint; this only keeps the switch in step.
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+const themeBox = $("#theme");
+function applyTheme() {
+  const chosen = document.documentElement.dataset.theme;
+  themeBox.checked = chosen ? chosen === "dark" : systemDark.matches;
+}
+themeBox.addEventListener("change", () => {
+  const dark = themeBox.checked;
+  if (dark === systemDark.matches) {
+    delete document.documentElement.dataset.theme;
+    prefs.remove("theme");
+  } else {
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    prefs.set("theme", dark ? "dark" : "light");
+  }
+});
+systemDark.addEventListener?.("change", applyTheme);
+
 const engBox = $("#engineer");
 engBox.checked = prefs.get("overseer.engineer") === "1";
 function applyEngineer() {
@@ -1369,6 +1391,7 @@ new ResizeObserver(() => layoutOrgWires()).observe($("#org"));
 document.fonts?.ready.then(layoutTrack);
 
 applyMotion();
+applyTheme();
 applyEngineer();
 drawFeed();
 loadPeople();
