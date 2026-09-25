@@ -15,11 +15,11 @@ what each queue is for.
 
 [![CI](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml/badge.svg)](https://github.com/latczar/agentic-qa-sd/actions/workflows/ci.yml)
 
-Phases 1-13. The full pipeline runs end to end on a laptop: a ticket is
+Phases 1-14. The full pipeline runs end to end on a laptop: a ticket is
 queued, analysed by a local model against knowledge retrieved through MCP,
 gated on confidence and risk, and either auto-recommended or routed to a human
 whose decision comes back through n8n, through the console, or through a
-Telegram message. Measured against a 40-case evaluation set, not eyeballed -
+Telegram message. A separate overseer page shows the worker doing it, live. Measured against a 40-case evaluation set, not eyeballed -
 and the evaluation has already caught two escalation bugs that 75 passing unit
 tests did not.
 
@@ -193,6 +193,9 @@ Worker (trusted code — writes its own bookkeeping straight to Postgres)
     you, where every ticket currently sits, and what each queue is for.
     `/instruct` lands here too — correcting the agent and sending the ticket
     back round, rather than only accepting or overruling what it produced.
+14. **The overseer** — a separate page that shows the worker doing the work,
+    live: which station of the pipeline it is at, what it is holding, how long
+    the model has been thinking, and the real depth of every broker queue.
 
 ## Local setup
 
@@ -263,6 +266,57 @@ step, no npm, no separate frontend container to keep running. It polls every
 few seconds because tickets change state in the background while nobody is
 looking at them, and checks the network dependencies on a slower timer because
 those cross the network and one of them is a model server.
+
+### The overseer
+
+`http://localhost:8000/overseer` is a separate page for watching the worker
+work. Each worker is a token on a track of the real pipeline stations (Queue,
+Screen, Retrieve, Model, Gate, Done) and moves when the worker reports a step,
+never on a timer. Under it: the live depth of `ticket.processing`,
+`ticket.retry` and `ticket.dead-letter` read straight from RabbitMQ, and two
+feeds side by side, **Live** and **Record**. The "Drop a ticket in" buttons
+raise a synthetic ticket so there is something to watch.
+
+**Why it needs its own channel.** The worker handles a ticket inside one
+database transaction and commits once, at the end. That is right for the
+record, and it means the database shows nothing while the worker is busy and
+then everything at once. It goes further than that: `audit_logs.created_at`
+defaults to Postgres's `now()`, which is the time the *transaction started*.
+A real 18-second run (5 seconds of retrieval, 13 of model) left four audit
+rows with the identical timestamp, to the millisecond. The record cannot say
+where the time went. So progress travels separately:
+
+```
+worker ──► worker.progress (fanout, transient) ──► API /overseer/stream (SSE) ──► browser
+```
+
+**Design decisions:**
+
+- **Telemetry, not record.** Progress events are fire-and-forget messages on a
+  non-durable fanout exchange. Nothing stores them; if no page is open they go
+  nowhere. The audit log stays the record of truth.
+- **Watching can never break the work.** Every publish is wrapped and a failure
+  is dropped. [`worker/tests/test_orchestrator.py`](worker/tests/test_orchestrator.py)
+  runs a whole ticket through a reporter that raises on every event and checks
+  it still resolves.
+- **Server-Sent Events, not WebSockets.** The traffic only goes one way. SSE is
+  plain HTTP, reconnects on its own, and needs no library at either end.
+- **One private queue per open tab.** Exclusive and server-named, so the broker
+  deletes it the moment the tab's connection closes. A tab closed without
+  warning leaves nothing behind.
+- **The broker is asked how many workers there are.** `consumer_count` on
+  `ticket.processing` is the "N workers connected" figure in the header - not an
+  inference from whether events happen to be arriving. Scale the worker
+  (`docker compose up -d --scale worker=3`) and three lanes appear.
+- **Heartbeats only while idle.** A busy worker's I/O loop is blocked for the
+  length of a model call, so it cannot send one. The page expects that: during
+  a model call it shows how long the call has been running rather than
+  declaring the worker lost.
+
+**Known rough edges:** each open overseer tab holds a thread and a broker
+connection on the API, which is fine for a handful of viewers and wrong for
+hundreds. And like the rest of this local API it has no authentication, so
+anyone who can reach port 8000 can watch.
 
 ### Watching one ticket go through the API directly
 

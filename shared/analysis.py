@@ -11,6 +11,7 @@ import json
 
 from pydantic import ValidationError
 
+from shared import progress
 from shared.ai_analysis import TicketAnalysis
 from shared.llm import LLMError, LLMProvider
 
@@ -34,6 +35,10 @@ def analyze_ticket(
     last_error: str | None = None
 
     for attempt in range(1, max_attempts + 1):
+        # The slowest step in the whole pipeline by a distance, so the one most
+        # worth seeing live: seconds of silence from a 7B model look like a hang
+        # unless something says the worker is waiting on it.
+        progress.emit("calling_model", attempt=attempt, model=getattr(provider, "model", None))
         try:
             raw = provider.generate(current_prompt)
         except LLMError as exc:
@@ -49,6 +54,7 @@ def analyze_ticket(
             except ValidationError as exc:
                 last_error = f"response didn't match the required schema: {exc}"
 
+        progress.emit("invalid_answer", attempt=attempt, error=last_error[:200], retrying=attempt < max_attempts)
         current_prompt = (
             f"{prompt}\n\n"
             f"Your previous answer was invalid: {last_error}\n"

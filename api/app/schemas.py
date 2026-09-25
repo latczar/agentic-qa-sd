@@ -168,3 +168,14 @@ class DependencyOut(BaseModel):
     # on: painting those red would make a correctly configured stack look
     # broken, and a red dot is the first thing anyone watching asks about.
     state: str = "up"
+
+
+class AuditEventOut(BaseModel):
+    """An audit_log row with its ticket's subject, for the overseer's record."""
+
+    id: int
+    ticket_id: int | None
+    subject: str | None
+    event_type: str
+    detail: dict | None
+    created_at: datetime
