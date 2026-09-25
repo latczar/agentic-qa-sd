@@ -194,8 +194,9 @@ Worker (trusted code — writes its own bookkeeping straight to Postgres)
     `/instruct` lands here too — correcting the agent and sending the ticket
     back round, rather than only accepting or overruling what it produced.
 14. **The overseer** — a separate page that shows the worker doing the work,
-    live: which station of the pipeline it is at, what it is holding, how long
-    the model has been thinking, and the real depth of every broker queue.
+    live, and lets you decide from where you watch. Borrows Paperclip's idea of
+    an org chart for agents, kept honest: the team is the system's real parts,
+    and each routine is judged by the traces it actually leaves.
 
 ## Local setup
 
@@ -269,13 +270,48 @@ those cross the network and one of them is a model server.
 
 ### The overseer
 
-`http://localhost:8000/overseer` is a separate page for watching the worker
-work. Each worker is a token on a track of the real pipeline stations (Queue,
-Screen, Retrieve, Model, Gate, Done) and moves when the worker reports a step,
-never on a timer. Under it: the live depth of `ticket.processing`,
-`ticket.retry` and `ticket.dead-letter` read straight from RabbitMQ, and two
-feeds side by side, **Live** and **Record**. The "Drop a ticket in" buttons
-raise a synthetic ticket so there is something to watch.
+`http://localhost:8000/overseer` is a separate page for watching the work
+and deciding what needs deciding. Three tabs:
+
+| Tab | What it shows |
+| --- | --- |
+| **Floor** | A track of the real pipeline (Waiting, Checking, Looking it up, Thinking, Deciding) that forks at the gate into **Solved**, **Needs you** and **Couldn't finish**. Each worker is a token that moves when it reports a step. Underneath, a card for every ticket waiting on you, and a plain-English feed of what is happening |
+| **Team** | An org chart of the parts that do the work, each labelled as what it is: you (person), the triage agent (AI agent), knowledge search (tool), the Telegram concierge (bot), and n8n (automation) |
+| **Routines** | Scheduled and triggered work - the approval notifier, the SLA chaser, retry with back-off, knowledge loading - each judged by the traces it leaves |
+
+The "Try it" buttons raise synthetic tickets so there is something to watch;
+the payroll one always comes to you. **Engineer view** swaps the plain labels
+for the real ones - queue names, model details, the gate's raw reasons, broker
+depths and the audit log.
+
+Things the page does on purpose:
+
+- **Decide where you watch.** Each waiting card carries the gate's reason in
+  plain words, the AI's suggestion, the articles it cited and how sure it was,
+  with Approve, I'll handle it, The AI got it wrong, and Correct it. Approve is
+  only the button that stands out when the AI is at least 70% sure *and* cites
+  a help article: a page that makes a 20%-sure, unsupported answer its biggest
+  green button is nudging people to wave it through.
+- **Pulses are real events.** A pulse runs along a wire when a ticket moves
+  between stations, when the triage agent asks knowledge search and the answer
+  comes back, or when n8n or Telegram is told. Nothing moves on a timer, so a
+  still page means a still system. Waiting ripples on each idle heartbeat.
+- **Pip, the desk pet, is a status light with a face.** Its mood comes from
+  real signals in a fixed order - unwell if a worker or service is down,
+  celebrating when a ticket is solved, watching while work moves, worried when
+  tickets have waited over an hour, puzzled when a routine goes quiet, asleep at
+  night - and it always says which, so it is never cheerful over a broken
+  pipeline.
+- **Routines are judged by evidence, not assumed.** The SLA chaser keeps no
+  state, so how many reminders a waiting ticket should have had is arithmetic;
+  fewer than that and the routine shows "Needs a look". On the dev data it
+  caught a real one: a ticket six days old with none of its five reminders.
+  [`api/tests/test_team.py`](api/tests/test_team.py) reads the n8n workflow
+  files and the worker's retry settings, so the page cannot go on describing a
+  schedule that has changed.
+- **Motion respects the system.** The Motion switch starts out following the
+  operating system's reduce-motion setting and can be changed by the viewer.
+  Every fact the animation shows is also written down.
 
 **Why it needs its own channel.** The worker handles a ticket inside one
 database transaction and commits once, at the end. That is right for the
@@ -307,7 +343,7 @@ worker ──► worker.progress (fanout, transient) ──► API /overseer/str
 - **The broker is asked how many workers there are.** `consumer_count` on
   `ticket.processing` is the "N workers connected" figure in the header - not an
   inference from whether events happen to be arriving. Scale the worker
-  (`docker compose up -d --scale worker=3`) and three lanes appear.
+  (`docker compose up -d --scale worker=3`) and three tokens appear.
 - **Heartbeats only while idle.** A busy worker's I/O loop is blocked for the
   length of a model call, so it cannot send one. The page expects that: during
   a model call it shows how long the call has been running rather than
@@ -315,8 +351,10 @@ worker ──► worker.progress (fanout, transient) ──► API /overseer/str
 
 **Known rough edges:** each open overseer tab holds a thread and a broker
 connection on the API, which is fine for a handful of viewers and wrong for
-hundreds. And like the rest of this local API it has no authentication, so
-anyone who can reach port 8000 can watch.
+hundreds. Like the rest of this local API it has no authentication, so anyone
+who can reach port 8000 can watch - and decide. And whether an n8n workflow is
+*active* is only visible inside n8n; the routines view reads the traces the
+workflows leave and says "Can't see from here" where there are none.
 
 ### Watching one ticket go through the API directly
 

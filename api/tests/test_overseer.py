@@ -33,12 +33,20 @@ from shared.progress import WORKER_PROGRESS_EXCHANGE, declare_progress_exchange,
 from shared.rabbitmq import get_connection
 
 
-def test_the_page_is_served(client):
-    response = client.get("/overseer")
+def test_the_page_and_its_assets_are_served(client):
+    page = client.get("/overseer")
 
-    assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
-    assert "EventSource" in response.text
+    assert page.status_code == 200
+    assert "text/html" in page.headers["content-type"]
+    # The script and styles live beside the page rather than inline, so the
+    # page is only whole if both are actually served where it asks for them.
+    assert '<script src="/static/overseer.js">' in page.text
+    assert '<link rel="stylesheet" href="/static/overseer.css">' in page.text
+
+    script = client.get("/static/overseer.js")
+    assert script.status_code == 200
+    assert 'new EventSource("/overseer/stream")' in script.text
+    assert client.get("/static/overseer.css").status_code == 200
 
 
 def test_recent_returns_the_newest_rows_with_their_subject(client, db_session):
