@@ -179,3 +179,48 @@ class AuditEventOut(BaseModel):
     event_type: str
     detail: dict | None
     created_at: datetime
+
+
+# --- Overseer: the floor ----------------------------------------------------
+
+
+class WaitingTicketOut(BaseModel):
+    """A ticket waiting on a person, carrying everything needed to decide it.
+
+    Deciding from the overseer means deciding without opening anything else,
+    so this holds the agent's suggestion, the evidence it cited and the gate's
+    reason in one place. A card that sends you elsewhere to find out what you
+    are approving is a card people approve without reading.
+    """
+
+    id: int
+    subject: str
+    description: str
+    source: TicketSource
+    created_at: datetime
+    waiting_since: datetime
+    reason: str | None
+    steered_by: str | None
+    category: str | None
+    priority: str | None
+    confidence: float | None
+    root_cause: str | None
+    suggestion: str | None
+    sources: list[dict]
+
+
+class OutcomeOut(BaseModel):
+    id: int
+    subject: str
+    status: TicketStatus
+    at: datetime
+    # A person's name when a person decided it; None when the agent did.
+    decided_by: str | None
+
+
+class BoardOut(BaseModel):
+    waiting: list[WaitingTicketOut]
+    solved: list[OutcomeOut]
+    failed: list[OutcomeOut]
+    solved_today: int
+    solved_automatically_today: int

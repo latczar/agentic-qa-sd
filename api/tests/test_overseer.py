@@ -12,12 +12,23 @@ import json
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pika
 
 from app.routers import overseer
-from shared.models import AuditLog, Ticket, User, UserRole
+from shared.models import (
+    AgentRun,
+    AgentRunStatus,
+    Approval,
+    ApprovalDecision,
+    AuditLog,
+    Ticket,
+    TicketStatus,
+    User,
+    UserRole,
+)
 from shared.progress import WORKER_PROGRESS_EXCHANGE, declare_progress_exchange, make_event
 from shared.rabbitmq import get_connection
 
@@ -114,3 +125,100 @@ def test_a_published_progress_event_reaches_a_subscriber():
     depths = next(d for e, d in pushed if e == "queues")
     assert {q["name"] for q in depths} == {"ticket.processing", "ticket.retry", "ticket.dead-letter"}
     assert not thread.is_alive(), "pump did not stop when told to"
+
+
+# --- The board --------------------------------------------------------------
+
+def _board_ticket(db_session, email, status, waited=timedelta(0)):
+    user = User(name="Priya Raman", email=email, role=UserRole.AGENT)
+    db_session.add(user)
+    db_session.commit()
+    ticket = Ticket(
+        submitted_by_id=user.id,
+        subject=f"Board {email}",
+        description="...",
+        status=status,
+        updated_at=datetime.now(timezone.utc) - waited,
+    )
+    db_session.add(ticket)
+    db_session.commit()
+    return ticket, user
+
+
+def test_a_waiting_card_carries_everything_needed_to_decide_it(client, db_session):
+    ticket, _ = _board_ticket(db_session, "card@example.com", TicketStatus.AWAITING_APPROVAL)
+    db_session.add(
+        AgentRun(
+            ticket_id=ticket.id,
+            status=AgentRunStatus.SUCCEEDED,
+            model="qwen2.5:7b-instruct",
+            latency_ms=900,
+            output={
+                "category": "Access",
+                "priority": "MEDIUM",
+                "confidence": 0.62,
+                "likely_root_cause": "Not in the payroll group",
+                "recommended_resolution": "Add the user to the payroll viewers group",
+                "sources": [{"document": "payroll-portal-access-denied", "title": "Payroll portal access denied"}],
+            },
+            confidence=0.62,
+        )
+    )
+    db_session.add(
+        AuditLog(
+            ticket_id=ticket.id,
+            event_type="human_approval_requested",
+            detail={"reason": "sensitive subject (payroll) always needs human approval"},
+        )
+    )
+    db_session.commit()
+
+    card = next(c for c in client.get("/overseer/board").json()["waiting"] if c["id"] == ticket.id)
+
+    assert card["suggestion"] == "Add the user to the payroll viewers group"
+    assert card["reason"].startswith("sensitive subject (payroll)")
+    assert card["confidence"] == 0.62
+    assert card["sources"][0]["title"] == "Payroll portal access denied"
+
+
+def test_a_ticket_screened_before_analysis_has_a_reason_but_no_suggestion(client, db_session):
+    ticket, _ = _board_ticket(db_session, "screened@example.com", TicketStatus.AWAITING_APPROVAL)
+    db_session.add(
+        AuditLog(
+            ticket_id=ticket.id,
+            event_type="human_approval_requested",
+            detail={"reason": "ticket text contains analyser-directed instructions ('set confidence')"},
+        )
+    )
+    db_session.commit()
+
+    card = next(c for c in client.get("/overseer/board").json()["waiting"] if c["id"] == ticket.id)
+
+    # No run happened, so there is nothing to approve - shown as such rather
+    # than as an empty suggestion someone might wave through.
+    assert card["suggestion"] is None
+    assert "analyser-directed" in card["reason"]
+
+
+def test_the_longest_waiting_ticket_comes_first(client, db_session):
+    newer, _ = _board_ticket(db_session, "newer@example.com", TicketStatus.AWAITING_APPROVAL, timedelta(minutes=5))
+    older, _ = _board_ticket(db_session, "older@example.com", TicketStatus.AWAITING_APPROVAL, timedelta(hours=2))
+
+    ids = [c["id"] for c in client.get("/overseer/board").json()["waiting"]]
+
+    assert ids.index(older.id) < ids.index(newer.id)
+
+
+def test_solved_tickets_say_whether_a_person_or_the_agent_solved_them(client, db_session):
+    by_agent, _ = _board_ticket(db_session, "auto@example.com", TicketStatus.RESOLVED)
+    by_person, person = _board_ticket(db_session, "human@example.com", TicketStatus.RESOLVED)
+    db_session.add(Approval(ticket_id=by_person.id, decision=ApprovalDecision.APPROVED, decided_by_id=person.id))
+    db_session.commit()
+
+    board = client.get("/overseer/board").json()
+    decided = {o["id"]: o["decided_by"] for o in board["solved"]}
+
+    assert decided[by_agent.id] is None
+    assert decided[by_person.id] == "Priya Raman"
+    assert board["solved_today"] == 2
+    assert board["solved_automatically_today"] == 1

@@ -5,6 +5,8 @@ Three routes:
 - GET /overseer         the page
 - GET /overseer/stream  Server-Sent Events: live worker steps and broker queue depths
 - GET /overseer/recent  the last few audit_log rows, i.e. what has been committed
+- GET /overseer/board   what the floor needs: tickets waiting on a person, with
+                        everything needed to decide them, and recent outcomes
 
 The stream and the record are deliberately shown side by side on the page. The
 stream says what the worker is doing now; the record only moves when a
@@ -21,15 +23,24 @@ import json
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.schemas import AuditEventOut
+from app.schemas import AuditEventOut, BoardOut, OutcomeOut, WaitingTicketOut
 from shared.db import get_db
-from shared.models import AuditLog, Ticket
+from shared.models import (
+    AgentRun,
+    AgentRunStatus,
+    Approval,
+    AuditLog,
+    Ticket,
+    TicketStatus,
+    User,
+)
 from shared.progress import WORKER_PROGRESS_EXCHANGE, declare_progress_exchange
 from shared.rabbitmq import (
     TICKET_DEAD_LETTER_QUEUE,
@@ -217,3 +228,121 @@ def overseer_recent(
         )
         for log, subject in rows
     ]
+
+
+# How many recent outcomes each exit shows. Enough that the floor is never an
+# empty diagram between tickets, few enough to read at a glance.
+RECENT_OUTCOMES = 4
+
+
+def _start_of_today() -> datetime:
+    # Midnight UTC, the same definition /overview uses, so the two pages can
+    # never disagree about what "today" means.
+    return datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _deciders(db: Session, ticket_ids: list[int]) -> dict[int, str]:
+    """Who decided each ticket, for those a person decided.
+
+    Absent from the result means no person did, which on a RESOLVED ticket
+    means the agent resolved it on its own. The overseer says which, because
+    "solved" and "solved by a person" are different claims about the agent.
+    """
+    if not ticket_ids:
+        return {}
+    rows = (
+        db.query(Approval.ticket_id, User.name)
+        .outerjoin(User, User.id == Approval.decided_by_id)
+        .filter(Approval.ticket_id.in_(ticket_ids))
+        .order_by(Approval.id.asc())
+        .all()
+    )
+    return {ticket_id: (name or "Someone") for ticket_id, name in rows}
+
+
+def _outcomes(db: Session, status: TicketStatus) -> list[OutcomeOut]:
+    tickets = (
+        db.query(Ticket)
+        .filter(Ticket.status == status)
+        .order_by(Ticket.updated_at.desc(), Ticket.id.desc())
+        .limit(RECENT_OUTCOMES)
+        .all()
+    )
+    deciders = _deciders(db, [t.id for t in tickets])
+    return [
+        OutcomeOut(id=t.id, subject=t.subject, status=t.status, at=t.updated_at, decided_by=deciders.get(t.id))
+        for t in tickets
+    ]
+
+
+@router.get("/board", response_model=BoardOut)
+def overseer_board(db: Session = Depends(get_db)) -> BoardOut:
+    # Oldest first: the ticket that has waited longest is the one to decide
+    # first, and a queue that shows the newest at the top quietly buries it.
+    waiting = (
+        db.query(Ticket)
+        .filter(Ticket.status == TicketStatus.AWAITING_APPROVAL)
+        .order_by(Ticket.updated_at.asc(), Ticket.id.asc())
+        .all()
+    )
+    ids = [t.id for t in waiting]
+
+    # Two IN queries for the whole list rather than two per ticket. Both are
+    # read in ascending order so the last row seen per ticket is its newest.
+    latest_run: dict[int, AgentRun] = {}
+    reasons: dict[int, str] = {}
+    if ids:
+        for run in (
+            db.query(AgentRun)
+            .filter(AgentRun.ticket_id.in_(ids), AgentRun.status == AgentRunStatus.SUCCEEDED)
+            .order_by(AgentRun.id.asc())
+        ):
+            latest_run[run.ticket_id] = run
+        for log in (
+            db.query(AuditLog)
+            .filter(AuditLog.ticket_id.in_(ids), AuditLog.event_type == "human_approval_requested")
+            .order_by(AuditLog.id.asc())
+        ):
+            reasons[log.ticket_id] = (log.detail or {}).get("reason")
+
+    cards = []
+    for t in waiting:
+        run = latest_run.get(t.id)
+        # A ticket screened out before analysis has no run at all, so no
+        # suggestion. That is shown as such rather than as a blank answer.
+        out = (run.output or {}) if run else {}
+        cards.append(
+            WaitingTicketOut(
+                id=t.id,
+                subject=t.subject,
+                description=t.description,
+                source=t.source,
+                created_at=t.created_at,
+                waiting_since=t.updated_at,
+                reason=reasons.get(t.id),
+                steered_by=t.human_instruction,
+                category=out.get("category"),
+                priority=out.get("priority"),
+                confidence=out.get("confidence"),
+                root_cause=out.get("likely_root_cause"),
+                suggestion=out.get("recommended_resolution"),
+                sources=out.get("sources") or [],
+            )
+        )
+
+    since = _start_of_today()
+    solved_today_ids = [
+        ticket_id
+        for (ticket_id,) in db.query(Ticket.id).filter(
+            Ticket.status == TicketStatus.RESOLVED, Ticket.updated_at >= since
+        )
+    ]
+    by_person = _deciders(db, solved_today_ids)
+
+    return BoardOut(
+        waiting=cards,
+        solved=_outcomes(db, TicketStatus.RESOLVED),
+        failed=_outcomes(db, TicketStatus.FAILED),
+        solved_today=len(solved_today_ids),
+        solved_automatically_today=len([i for i in solved_today_ids if i not in by_person]),
+    )
