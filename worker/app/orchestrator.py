@@ -15,6 +15,7 @@ from app import mcp_client, rules
 from app.mcp_client import MCPError
 from app.prompt import build_prompt
 from shared import db as shared_db
+from shared import progress
 from shared.ai_analysis import TicketAnalysis
 from shared.analysis import AnalysisError, analyze_ticket
 from shared.config import GENERATION_MODEL, RETRIEVAL_MODE
@@ -140,17 +141,21 @@ def run(
     # ticket's own words, and a ticket that trips it goes to a human
     # whatever the model would have said - so there is nothing to gain by
     # retrieving and generating first.
+    progress.emit("screening", ticket.id)
     screened = rules.screen_ticket_text(ticket_context)
     if screened:
+        progress.emit("screened_out", reason=screened.reason)
         _escalate_unanalysed(db, ticket, screened)
         return None
 
     query = f"{ticket.subject}\n{ticket.description}"
     articles: list[RetrievedArticle] = []
 
+    progress.emit("retrieving", via=RETRIEVAL_MODE)
     try:
         articles = _retrieve(db, embedding_provider, query)
     except (EmbeddingError, MCPError) as exc:
+        progress.emit("run_failed", error=f"retrieval failed: {exc}")
         # Couldn't even ask the question - that's a failure to retrieve, not a
         # finding of "nothing relevant". Worth retrying; Ollama may be back.
         _record_failure(db, ticket, articles, 0, started, f"retrieval failed: {exc}")
@@ -164,11 +169,21 @@ def run(
         )
     )
 
+    progress.emit("retrieved", slugs=[a.slug for a in articles])
+
     prompt = build_prompt(ticket, articles, _known_service_names(db))
+    progress.emit(
+        "prompt_built",
+        articles=len(articles),
+        # Worth showing: a steered run is answering a person's correction, and
+        # watching it without knowing that would misread what it is doing.
+        steered=bool((ticket.human_instruction or "").strip()),
+    )
 
     try:
         analysis = analyze_ticket(llm_provider, prompt)
     except AnalysisError as exc:
+        progress.emit("run_failed", error=str(exc))
         _record_failure(db, ticket, articles, 0, started, str(exc))
         # The model being unreachable or never returning valid JSON is worth
         # another go later; it is not a permanent property of this ticket.
@@ -178,11 +193,18 @@ def run(
     # from how the model summarised it, and verifies citations against what
     # retrieval actually returned rather than trusting the model to only name
     # documents it was given.
+    progress.emit(
+        "analysed",
+        category=analysis.category,
+        priority=analysis.priority.value,
+        confidence=analysis.confidence,
+    )
     gate = rules.evaluate(
         analysis,
         ticket_context=ticket_context,
         retrieved_slugs=[a.slug for a in articles],
     )
+    progress.emit("gate", requires_human=gate.requires_human_approval, reason=gate.reason)
     _apply(db, ticket, analysis, gate)
 
     db.add(
@@ -231,6 +253,7 @@ def run(
                 detail={"reason": gate.reason, "notified": notified},
             )
         )
+        progress.emit("notified", channels=notified)
     else:
         db.add(
             AuditLog(

@@ -7,6 +7,7 @@ from app.consumer import MAX_RETRIES, on_message
 from app.processing import RetryableProcessingError
 from shared.models import ProcessedEvent, Ticket, TicketStatus, User, UserRole
 from shared.rabbitmq import TICKET_DEAD_LETTER_QUEUE, TICKET_RETRY_QUEUE
+from shared.progress import RecordingProgressReporter, use_reporter
 
 
 def _make_ticket(db_session, email: str) -> Ticket:
@@ -143,3 +144,36 @@ def test_unexpected_error_is_dead_lettered_not_retried(db_session):
     channel.basic_ack.assert_called_once_with(1)
     _, kwargs = channel.basic_publish.call_args
     assert kwargs["routing_key"] == TICKET_DEAD_LETTER_QUEUE
+
+
+def test_the_overseer_sees_pick_up_before_the_work_and_finish_after_it(db_session):
+    ticket = _make_ticket(db_session, f"progress-{uuid.uuid4()}@example.com")
+    seen_during_work = []
+
+    with use_reporter(RecordingProgressReporter()) as reporter:
+
+        def work(db, t):
+            seen_during_work.append(list(reporter.steps))
+            t.status = TicketStatus.RESOLVED
+
+        on_message(MagicMock(), _method(), None, json.dumps(_payload(ticket.id)).encode(), process_fn=work)
+
+    assert seen_during_work == [["picked_up"]]
+    assert reporter.steps == ["picked_up", "finished"]
+    assert reporter.events[-1]["detail"]["status"] == "RESOLVED"
+    # The worker has let go, so later idle heartbeats carry no ticket.
+    assert reporter.current_ticket is None
+
+
+def test_finished_is_not_reported_for_work_that_did_not_finish(db_session):
+    """"finished" means committed. A failed attempt must not claim it."""
+    ticket = _make_ticket(db_session, f"progress-{uuid.uuid4()}@example.com")
+
+    def fail(db, t):
+        raise RetryableProcessingError("model unreachable")
+
+    with use_reporter(RecordingProgressReporter()) as reporter:
+        on_message(MagicMock(), _method(), None, json.dumps(_payload(ticket.id)).encode(), process_fn=fail)
+
+    assert reporter.steps == ["picked_up", "retry_scheduled"]
+    assert "finished" not in reporter.steps

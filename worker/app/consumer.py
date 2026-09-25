@@ -8,6 +8,7 @@ from pika.spec import Basic, BasicProperties
 
 from app.processing import RetryableProcessingError, process_ticket
 from shared import db as shared_db
+from shared import progress
 from shared.models import AuditLog, ProcessedEvent, Ticket, TicketStatus
 from shared.rabbitmq import (
     TICKET_DEAD_LETTER_QUEUE,
@@ -16,6 +17,7 @@ from shared.rabbitmq import (
     declare_topology,
     get_connection,
 )
+from shared.progress import RabbitProgressReporter, declare_progress_exchange
 
 logger = logging.getLogger("worker")
 
@@ -41,6 +43,7 @@ def _schedule_retry(channel: BlockingChannel, payload: dict) -> None:
     logger.warning(
         "scheduled retry %s for ticket %s in %sms", payload["retry_count"], payload.get("ticket_id"), delay_ms
     )
+    progress.emit("retry_scheduled", attempt=payload["retry_count"], delay_ms=delay_ms)
 
 
 def _dead_letter(channel: BlockingChannel, payload: dict, reason: str) -> None:
@@ -52,6 +55,7 @@ def _dead_letter(channel: BlockingChannel, payload: dict, reason: str) -> None:
         properties=pika.BasicProperties(delivery_mode=2),
     )
     logger.error("dead-lettered ticket %s: %s", payload.get("ticket_id"), reason)
+    progress.emit("dead_lettered", reason=reason)
 
     ticket_id = payload.get("ticket_id")
     db = shared_db.SessionLocal()
@@ -110,11 +114,18 @@ def on_message(
             channel.basic_ack(method.delivery_tag)
             return
 
+        progress.emit("picked_up", ticket.id, subject=ticket.subject, retry_count=retry_count)
         process_fn(db, ticket)
+        # Read before the commit: after it, this would be a fresh query, and
+        # the overseer only needs to know where the worker left the ticket.
+        final_status = ticket.status.value
         db.add(ProcessedEvent(event_id=event_id, ticket_id=ticket_id))
         db.commit()
         channel.basic_ack(method.delivery_tag)
         logger.info("processed ticket %s (event %s)", ticket_id, event_id)
+        # Only after the commit. "finished" on the overseer means the record
+        # is written, so it must not be sent while a rollback is still possible.
+        progress.emit("finished", status=final_status)
 
     except RetryableProcessingError as exc:
         db.rollback()
@@ -132,7 +143,22 @@ def on_message(
         channel.basic_ack(method.delivery_tag)
 
     finally:
+        progress.release()
         db.close()
+
+
+# How often an idle worker says it is still there. A worker waiting for work
+# and a worker that has died look identical from outside otherwise.
+HEARTBEAT_SECONDS = 5
+
+
+def _heartbeat(connection) -> None:
+    # Only fires while the worker is idle in start_consuming: a callback that
+    # is busy with a ticket blocks the I/O loop, so no heartbeat is sent during
+    # a long model call. That is fine - the step events cover busy periods, and
+    # the overseer shows how long the current step has been running instead.
+    progress.emit("heartbeat", state="idle")
+    connection.call_later(HEARTBEAT_SECONDS, lambda: _heartbeat(connection))
 
 
 def main() -> None:
@@ -140,9 +166,12 @@ def main() -> None:
     connection = get_connection()
     channel = connection.channel()
     declare_topology(channel)
+    declare_progress_exchange(channel)
+    progress.set_reporter(RabbitProgressReporter(channel))
     channel.basic_qos(prefetch_count=1)
     channel.basic_consume(queue=TICKET_PROCESSING_QUEUE, on_message_callback=on_message)
     logger.info("worker started, waiting for messages on %s", TICKET_PROCESSING_QUEUE)
+    _heartbeat(connection)
     channel.start_consuming()
 
 

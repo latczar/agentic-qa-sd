@@ -3,6 +3,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app import orchestrator
+from shared import progress
 from shared.embeddings import get_embedding_provider
 from shared.llm import get_llm_provider
 from shared.models import AuditLog, Ticket, TicketStatus
@@ -40,6 +41,7 @@ def process_ticket(db: Session, ticket: Ticket) -> None:
         logger.info(
             "ticket %s is already %s - not re-analysing", ticket.id, ticket.status.value
         )
+        progress.emit("skipped", ticket.id, status=ticket.status.value)
         db.add(
             AuditLog(
                 ticket_id=ticket.id,

@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
-from app.routers import approvals, overview, services, tickets, users
+from app.routers import approvals, overseer, overview, services, tickets, users
 from shared.db import ping_database
 
 app = FastAPI(title="AI Service Desk Agent")
@@ -15,6 +15,7 @@ app.include_router(approvals.router)
 app.include_router(users.router)
 app.include_router(services.router)
 app.include_router(overview.router)
+app.include_router(overseer.router)
 
 
 @app.get("/", include_in_schema=False)
