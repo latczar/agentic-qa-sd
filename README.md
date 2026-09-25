@@ -233,128 +233,52 @@ ollama pull qwen2.5:7b-instruct   # generation, tool-calling capable
 docker compose exec api python -m app.ingest_knowledge
 ```
 
-### Demo
+### What it looks like
 
-![Ticket list](docs/media/01-ticket-list.png)
+**The overseer** at `/overseer`: the real pipeline as a track that forks at the
+gate, with the tickets that need you in a drawer beside it, so you decide while
+you watch.
 
-A correct answer the system still refused to act on, because it had no evidence
-behind it - the strongest single frame in the project:
+![The overseer: the track and the Needs you drawer](docs/media/05-overseer-floor.png)
 
-![Analysis panel](docs/media/02-analysis-resolved.png)
+- Tokens move only when the worker reports a step, and pulses only run on real
+  events. A still page is a still system.
+- Approve only stands out when the AI is at least 70% sure *and* cites a help
+  article.
+- Pip, the desk pet, takes its mood from real signals and says why. It levels
+  up from the desk's all-time solved tickets, read from the database.
+- Tickets go in from the tray (drag or click), **+ New ticket** (`N`), the
+  console or Telegram. **Engineer view** shows queue names, raw reasons, broker
+  depths and the audit log.
 
-Full walkthrough with talking points for each screen: **[docs/DEMO.md](docs/DEMO.md)**.
-
-### The console
-
-`http://localhost:8000` serves a four-tab console.
-
-| Tab | What it is for |
+| Team | Routines |
 | --- | --- |
-| **Needs you** | Only the tickets waiting on a person, with a count badge. Approve, hand-close, overrule, or correct the agent and send it back round |
-| **Pipeline** | Every queue in the system, in the order work moves through them, with a live count and a sentence saying what that queue is for. Plus whether Postgres, RabbitMQ, Ollama, the MCP server and Telegram are reachable |
-| **Board** | Every ticket, newest first |
-| **Raise a ticket** | The submission form |
+| ![Org chart of the parts that do the work](docs/media/06-overseer-team.png) | ![Routines judged by the traces they leave](docs/media/07-overseer-routines.png) |
+| Each part labelled as what it is: person, AI agent, tool, bot, automation | Each routine judged by the traces it leaves, and "Can't see from here" where there are none |
 
-The Pipeline tab is the one worth looking at. Each row is a real queue, not a
-metaphor: an amber dot means work is sitting on a person, red means something
-is stuck, and a pulsing blue dot means work is actually moving. There is no
-stage on that screen that does not correspond to a ticket status the worker
-really sets, which is the whole point - a dashboard that invents stages to look
-busy is worse than no dashboard.
+**The console** at `/`: Needs you, Pipeline, Board and Raise a ticket, on the
+same endpoints. Pipeline shows every real queue in order, and what each is for.
 
-Plain HTML and fetch against the same endpoints documented below - no build
-step, no npm, no separate frontend container to keep running. It polls every
-few seconds because tickets change state in the background while nobody is
-looking at them, and checks the network dependencies on a slower timer because
-those cross the network and one of them is a model server.
+![The console's pipeline tab](docs/media/08-console-pipeline.png)
 
-### The overseer
-
-`http://localhost:8000/overseer` is a separate page for watching the work
-and deciding what needs deciding. Three tabs:
-
-| Tab | What it shows |
-| --- | --- |
-| **Floor** | A track of the real pipeline (Waiting, Checking, Looking it up, Thinking, Deciding) that forks at the gate into **Solved**, **Needs you** and **Couldn't finish**. Each worker is a token that moves when it reports a step. Underneath, a card for every ticket waiting on you, and a plain-English feed of what is happening |
-| **Team** | An org chart of the parts that do the work, each labelled as what it is: you (person), the triage agent (AI agent), knowledge search (tool), the Telegram concierge (bot), and n8n (automation) |
-| **Routines** | Scheduled and triggered work - the approval notifier, the SLA chaser, retry with back-off, knowledge loading - each judged by the traces it leaves |
-
-The "Try it" buttons raise synthetic tickets so there is something to watch;
-the payroll one always comes to you. **Engineer view** swaps the plain labels
-for the real ones - queue names, model details, the gate's raw reasons, broker
-depths and the audit log.
-
-Things the page does on purpose:
-
-- **Decide where you watch.** Each waiting card carries the gate's reason in
-  plain words, the AI's suggestion, the articles it cited and how sure it was,
-  with Approve, I'll handle it, The AI got it wrong, and Correct it. Approve is
-  only the button that stands out when the AI is at least 70% sure *and* cites
-  a help article: a page that makes a 20%-sure, unsupported answer its biggest
-  green button is nudging people to wave it through.
-- **Pulses are real events.** A pulse runs along a wire when a ticket moves
-  between stations, when the triage agent asks knowledge search and the answer
-  comes back, or when n8n or Telegram is told. Nothing moves on a timer, so a
-  still page means a still system. Waiting ripples on each idle heartbeat.
-- **Pip, the desk pet, is a status light with a face.** Its mood comes from
-  real signals in a fixed order - unwell if a worker or service is down,
-  celebrating when a ticket is solved, watching while work moves, worried when
-  tickets have waited over an hour, puzzled when a routine goes quiet, asleep at
-  night - and it always says which, so it is never cheerful over a broken
-  pipeline.
-- **Routines are judged by evidence, not assumed.** The SLA chaser keeps no
-  state, so how many reminders a waiting ticket should have had is arithmetic;
-  fewer than that and the routine shows "Needs a look". On the dev data it
-  caught a real one: a ticket six days old with none of its five reminders.
-  [`api/tests/test_team.py`](api/tests/test_team.py) reads the n8n workflow
-  files and the worker's retry settings, so the page cannot go on describing a
-  schedule that has changed.
-- **Motion respects the system.** The Motion switch starts out following the
-  operating system's reduce-motion setting and can be changed by the viewer.
-  Every fact the animation shows is also written down.
-
-**Why it needs its own channel.** The worker handles a ticket inside one
-database transaction and commits once, at the end. That is right for the
-record, and it means the database shows nothing while the worker is busy and
-then everything at once. It goes further than that: `audit_logs.created_at`
-defaults to Postgres's `now()`, which is the time the *transaction started*.
-A real 18-second run (5 seconds of retrieval, 13 of model) left four audit
-rows with the identical timestamp, to the millisecond. The record cannot say
-where the time went. So progress travels separately:
+**How the live view works.** The worker commits each ticket in one
+transaction, so the database shows nothing until the end. Progress travels
+separately, as fire-and-forget telemetry:
 
 ```
 worker ──► worker.progress (fanout, transient) ──► API /overseer/stream (SSE) ──► browser
 ```
 
-**Design decisions:**
-
-- **Telemetry, not record.** Progress events are fire-and-forget messages on a
-  non-durable fanout exchange. Nothing stores them; if no page is open they go
-  nowhere. The audit log stays the record of truth.
-- **Watching can never break the work.** Every publish is wrapped and a failure
-  is dropped. [`worker/tests/test_orchestrator.py`](worker/tests/test_orchestrator.py)
-  runs a whole ticket through a reporter that raises on every event and checks
-  it still resolves.
-- **Server-Sent Events, not WebSockets.** The traffic only goes one way. SSE is
-  plain HTTP, reconnects on its own, and needs no library at either end.
-- **One private queue per open tab.** Exclusive and server-named, so the broker
-  deletes it the moment the tab's connection closes. A tab closed without
-  warning leaves nothing behind.
-- **The broker is asked how many workers there are.** `consumer_count` on
-  `ticket.processing` is the "N workers connected" figure in the header - not an
-  inference from whether events happen to be arriving. Scale the worker
-  (`docker compose up -d --scale worker=3`) and three tokens appear.
-- **Heartbeats only while idle.** A busy worker's I/O loop is blocked for the
-  length of a model call, so it cannot send one. The page expects that: during
-  a model call it shows how long the call has been running rather than
-  declaring the worker lost.
+A failed publish is dropped, never raised, so watching can never break the
+work: a test runs a whole ticket through a reporter that fails on every event.
 
 **Known rough edges:** each open overseer tab holds a thread and a broker
-connection on the API, which is fine for a handful of viewers and wrong for
-hundreds. Like the rest of this local API it has no authentication, so anyone
-who can reach port 8000 can watch - and decide. And whether an n8n workflow is
-*active* is only visible inside n8n; the routines view reads the traces the
-workflows leave and says "Can't see from here" where there are none.
+connection on the API, fine for a handful of viewers, not hundreds. There is no
+authentication, so anyone who can reach port 8000 can watch and decide.
+
+Talking points for a live demo are in [docs/DEMO.md](docs/DEMO.md) (its
+screenshots are from an earlier version of the console). Regenerate the
+screenshots above with `python docs/capture_screenshots.py`.
 
 ### Watching one ticket go through the API directly
 
@@ -746,13 +670,15 @@ made that visible immediately.
 
 ## Testing
 
-Three suites, 109 tests, all against a real Postgres - no SQLite stand-in.
+Four suites, 187 tests, all against a real Postgres - no SQLite stand-in.
 
-- **api** (52) - ticket CRUD, approvals, the validate-and-retry loop, the n8n
-  notifier, and one real AMQP round-trip.
-- **worker** (49) - queue plumbing (ack, retry, dead-letter, idempotency),
-  orchestration against a scripted model, the approval gate, and the prompt's
-  boundary between our instructions and the submitter's text.
+- **api** (99) - ticket CRUD, approvals, the validate-and-retry loop, the n8n
+  notifier, the overseer's board, team and routines, and real AMQP round-trips.
+- **worker** (66) - queue plumbing (ack, retry, dead-letter, idempotency),
+  orchestration against a scripted model, the approval gate, progress events,
+  and the prompt's boundary between our instructions and the submitter's text.
+- **telegram_bot** (14) - the allowlist, deciding from a chat, and handling
+  each update once, against a fake Telegram and a fake API.
 - **mcp_server** (8) - what each tool returns, refuses, and clamps.
 
 No test needs Ollama, an MCP server or n8n running: the model is swapped for a
@@ -772,6 +698,7 @@ docker compose up -d postgres rabbitmq
 cd api        && pip install -r requirements.txt && pytest -m "not ollama"
 cd worker     && pip install -r requirements.txt && pytest
 cd mcp_server && pip install -r requirements.txt && pytest
+cd telegram_bot && pip install -r requirements.txt && pytest
 ```
 
 Known limitation: tests use a dedicated Postgres database but share the same
