@@ -349,12 +349,18 @@ def _sla_chaser(db: Session) -> RoutineOut:
     # missed once a whole run has passed after it.
     now = datetime.now(timezone.utc)
     worst = None
+    # Working is only claimed on evidence from now: a waiting ticket that was
+    # due reminders and got every one. A reminder posted last week says the
+    # chaser worked last week, not that it is working today.
+    checked = False
     for ticket_id, since in waiting:
         waited = (now - since).total_seconds() / 60
         due = sum(1 for m in SLA_CHASE_AT_MINUTES if waited >= m + SLA_RUN_EVERY_MINUTES)
         got = len([c for c in chases_by_ticket.get(ticket_id, []) if c >= since])
         if got < due and (worst is None or due - got > worst[1] - worst[2]):
             worst = (ticket_id, due, got, waited)
+        if due and got >= due:
+            checked = True
 
     if worst:
         ticket_id, due, got, waited = worst
@@ -368,7 +374,7 @@ def _sla_chaser(db: Session) -> RoutineOut:
             "Either the chaser is not active in n8n, or the stack was not running "
             "while that time passed."
         )
-    elif last_chase:
+    elif checked:
         state, note = "ok", None
     else:
         state, note = "unknown", "Nothing has waited long enough to need a reminder, so there is nothing to check."

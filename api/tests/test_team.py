@@ -137,6 +137,20 @@ def test_with_nothing_to_chase_the_chaser_is_unknown_not_ok(client, db_session):
     assert _routine(client, "sla_chaser")["state"] == "unknown"
 
 
+def test_an_old_reminder_is_not_evidence_the_chaser_works_now(client, db_session):
+    """It chased something last week; nothing waiting now is due a reminder."""
+    old = _waiting_ticket(db_session, "last-week@example.com", timedelta(days=8))
+    _chase(db_session, old, datetime.now(timezone.utc) - timedelta(days=7))
+    old.status = TicketStatus.ESCALATED
+    db_session.commit()
+    _waiting_ticket(db_session, "fresh-now@example.com", timedelta(minutes=10))
+
+    chaser = _routine(client, "sla_chaser")
+
+    assert chaser["state"] == "unknown"
+    assert chaser["evidence"] == f"Last reminder posted on #{old.id}"
+
+
 # --- The approval notifier --------------------------------------------------
 
 
