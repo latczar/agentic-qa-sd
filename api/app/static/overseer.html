@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Overseer · AI Service Desk</title>
 <link rel="stylesheet" href="/static/overseer.css">
+<script>
+  // Apply a saved light/dark choice before the first paint, so the page never
+  // flashes the other theme. Storage can be blocked; the system's choice stands then.
+  try { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
 </head>
 <body>
 
@@ -20,6 +25,9 @@
   <label class="control">You are <select id="me" aria-label="Who is deciding"></select></label>
   <label class="switch" title="Pulses and animations. Off to begin with if your system asks for less motion.">
     <input type="checkbox" id="motion"><span class="knob"></span>Motion
+  </label>
+  <label class="switch" title="Follows your system until you choose. Remembered in this browser, and shared with the console.">
+    <input type="checkbox" id="theme"><span class="knob"></span>Dark mode
   </label>
   <label class="switch" title="Show queue names, model details, raw reasons and the audit log">
     <input type="checkbox" id="engineer"><span class="knob"></span>Engineer view

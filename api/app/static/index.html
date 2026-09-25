@@ -5,24 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI Service Desk</title>
 <style>
+  /* Light unless the system asks for dark, or the viewer has picked dark with the
+     switch in the header (saved as data-theme on <html> before the first paint). */
   :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --panel-2: #1e222b;
-    --line: #2a2f3a;
-    --text: #e6e8ec;
-    --muted: #9aa3b2;
-    --accent: #5b8def;
-    --ok: #3fb950;
-    --warn: #d29922;
-    --bad: #f85149;
-    --info: #58a6ff;
+    color-scheme: light;
+    --bg: #f6f7f9; --panel: #fff; --panel-2: #f0f2f5; --line: #dce0e6;
+    --text: #1b1f27; --muted: #5b6472;
+    /* Darker than the dark theme's status colours: those were picked to glow on
+       near-black and are hard to read as text on white. */
+    --accent: #2563d0; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --info: #0969da;
+    --accent-solid: var(--accent); --ok-solid: var(--ok); --bad-solid: var(--bad);
   }
-  @media (prefers-color-scheme: light) {
-    :root:not([data-theme="dark"]) {
-      --bg: #f6f7f9; --panel: #fff; --panel-2: #f0f2f5; --line: #dce0e6;
-      --text: #1b1f27; --muted: #5b6472;
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #0f1115; --panel: #171a21; --panel-2: #1e222b; --line: #2a2f3a;
+      --text: #e6e8ec; --muted: #9aa3b2;
+      --accent: #5b8def; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --info: #58a6ff;
+      --accent-solid: #3a6fd8; --ok-solid: #238636; --bad-solid: #da3633;
     }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1e222b; --line: #2a2f3a;
+    --text: #e6e8ec; --muted: #9aa3b2;
+    --accent: #5b8def; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --info: #58a6ff;
+    --accent-solid: #3a6fd8; --ok-solid: #238636; --bad-solid: #da3633;
   }
   * { box-sizing: border-box; }
   body {
@@ -37,6 +45,13 @@
   header .sub { color: var(--muted); font-size: 13px; flex: 1; min-width: 180px; }
   header .who { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
   header .who select { width: auto; padding: 5px 8px; font-size: 13px; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; font-size: 13px; color: var(--muted); user-select: none; }
+  .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; padding: 0; margin: 0; }
+  .switch .knob { width: 34px; height: 20px; border-radius: 999px; background: var(--line); position: relative; transition: background .2s; flex: none; }
+  .switch .knob::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .2s; }
+  .switch input:checked + .knob { background: var(--accent); }
+  .switch input:checked + .knob::after { transform: translateX(14px); }
+  .switch input:focus-visible + .knob { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* Tabs ------------------------------------------------------------------ */
   nav { display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
@@ -48,7 +63,7 @@
   }
   nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
   nav .pill {
-    background: var(--bad); color: #fff; border-radius: 999px; font-size: 11px;
+    background: var(--bad-solid); color: #fff; border-radius: 999px; font-size: 11px;
     padding: 1px 7px; font-variant-numeric: tabular-nums; letter-spacing: 0;
   }
   nav .pill.quiet { background: var(--line); color: var(--muted); }
@@ -64,11 +79,11 @@
     border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
   }
   textarea { min-height: 96px; resize: vertical; }
-  button { cursor: pointer; border-color: transparent; background: var(--accent); color: #fff; font-weight: 600; margin-top: 14px; }
+  button { cursor: pointer; border-color: transparent; background: var(--accent-solid); color: #fff; font-weight: 600; margin-top: 14px; }
   button:disabled { opacity: .55; cursor: default; }
   button.ghost { background: transparent; border-color: var(--line); color: var(--text); font-weight: 500; margin: 0; width: auto; padding: 6px 12px; }
-  button.solid-ok { background: var(--ok); color: #fff; border-color: transparent; margin: 0; width: auto; padding: 6px 12px; font-weight: 600; }
-  button.solid-bad { background: var(--bad); color: #fff; border-color: transparent; margin: 0; width: auto; padding: 6px 12px; font-weight: 600; }
+  button.solid-ok { background: var(--ok-solid); color: #fff; border-color: transparent; margin: 0; width: auto; padding: 6px 12px; font-weight: 600; }
+  button.solid-bad { background: var(--bad-solid); color: #fff; border-color: transparent; margin: 0; width: auto; padding: 6px 12px; font-weight: 600; }
 
   /* Tickets --------------------------------------------------------------- */
   .ticket { border: 1px solid var(--line); border-radius: 9px; padding: 12px; margin-bottom: 10px; background: var(--panel); }
@@ -136,12 +151,20 @@
   .tile .l { color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; }
   [hidden] { display: none !important; }
 </style>
+<script>
+  // Apply a saved light/dark choice before the first paint, so the page never
+  // flashes the other theme. Storage can be blocked; the system's choice stands then.
+  try { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
 </head>
 <body>
 <header>
   <h1>AI Service Desk</h1>
   <span class="sub">local models · RAG over pgvector · human-in-the-loop</span>
   <a href="/overseer" style="font-size:13px;color:var(--accent);text-decoration:none">Overseer →</a>
+  <label class="switch" title="Follows your system until you choose. Remembered in this browser, and shared with the overseer.">
+    <input type="checkbox" id="theme"><span class="knob"></span>Dark mode
+  </label>
   <span class="who">
     <label for="user" style="margin:0">Acting as</label>
     <select id="user" required></select>
@@ -223,6 +246,24 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
+
+// Light or dark, as on the overseer: follows the system until the viewer picks
+// one, and picking the system's own choice goes back to following it.
+(() => {
+  const systemDark = matchMedia("(prefers-color-scheme: dark)");
+  const box = $("#theme");
+  const root = document.documentElement;
+  const sync = () => { box.checked = root.dataset.theme ? root.dataset.theme === "dark" : systemDark.matches; };
+  box.addEventListener("change", () => {
+    const dark = box.checked;
+    try {
+      if (dark === systemDark.matches) { delete root.dataset.theme; localStorage.removeItem("theme"); }
+      else { root.dataset.theme = dark ? "dark" : "light"; localStorage.setItem("theme", root.dataset.theme); }
+    } catch { root.dataset.theme = dark ? "dark" : "light"; }
+  });
+  systemDark.addEventListener?.("change", sync);
+  sync();
+})();
 const analysisCache = {};
 let approvalsByTicket = {};
 let state = { tab: "needs", tickets: [], overview: null, health: [] };
