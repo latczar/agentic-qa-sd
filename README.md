@@ -46,7 +46,8 @@ Worker (trusted code — writes its own bookkeeping straight to Postgres)
         ├─ passes ──────────────► RESOLVED
         └─ needs a human ───────► AWAITING_APPROVAL
                                     │
-                                    ├─ webhook ──► n8n ──► notify / branch on priority
+                                    ├─ webhook  ──► n8n ──► notify / branch on priority
+                                    ├─ Telegram ──► buttons in a chat, on a phone
                                     ▼
                           POST /approve ──► RESOLVED    (do what the agent said)
                           POST /handled ──► RESOLVED    (a person did it themselves)
@@ -321,6 +322,76 @@ identical either way (an index changes how Postgres finds rows, not which rows m
 so the tests stay honest — but they are not measuring index behaviour, and aren't
 meant to.
 
+
+## Telegram
+
+Optional, and off unless you give it a token. With it on, anyone on the
+allowlist can raise a ticket by messaging the bot, and approval requests
+arrive in the chat with **Approve**, **I handled it** and **Agent was wrong**
+as buttons.
+
+```
+you ──► Telegram ──► telegram-bot ──► POST /tickets           (a message becomes a ticket)
+                         │
+worker ── approval needed ──► Telegram ──► you tap a button
+                         │
+                         └──► POST /tickets/{id}/approve | handled | reject
+```
+
+### Setting it up
+
+1. Message **@BotFather** on Telegram, send `/newbot`, and put the token it
+   gives you in `.env` as `TELEGRAM_BOT_TOKEN`.
+2. Start the bot: `docker compose --profile telegram up -d telegram-bot`
+3. Message your bot anything. It will refuse you, and
+   `docker compose logs telegram-bot` will show the chat id it refused - that
+   log line is the intended way to find your own id.
+4. Put that id in `TELEGRAM_ALLOWED_CHAT_IDS` and restart the bot and worker.
+5. In the chat, `/link you@example.com` with the email of a seeded user, so
+   tickets and decisions are attributed to a person.
+
+| Command | Does |
+| --- | --- |
+| any text | Raises a ticket. First line is the subject, the whole message is the description |
+| `/link you@example.com` | Binds this chat to a user |
+| `/status` | What the pipeline is doing right now |
+| `/instruct 42 it is a network fault` | Corrects the agent and re-runs ticket 42 |
+
+### Design decisions
+
+- **Long polling, not a webhook.** A webhook needs a public HTTPS URL that
+  Telegram can reach. This runs on a laptop behind a router, so `getUpdates`
+  it is: outbound HTTP only, no tunnel, nothing exposed.
+- **The bot goes through the API for every ticket change.** It never writes
+  ticket state to Postgres itself. The `AWAITING_APPROVAL` guard, the approvals
+  record and the audit trail apply to a decision made on a phone exactly as they
+  do to one made in the browser, because it is the same code. The bot's own
+  bookkeeping - which update it has seen, which chat is which person - is its
+  private state and does use the database directly.
+- **The allowlist fails closed.** Anyone can find a bot by its username and
+  start typing at it, and these buttons resolve real tickets. An empty
+  allowlist means nobody, and a malformed one stops the service from starting
+  rather than silently shrinking.
+- **Every update is handled at most once.** Telegram redelivers anything below
+  the acknowledged offset, so a crash between "approved the ticket" and
+  "advanced the offset" would approve it twice. Same `processed_events` table
+  and the same reasoning as the RabbitMQ consumer.
+- **Buttons are stripped once a ticket is decided.** The message is rewritten
+  with the outcome and without its keyboard, whatever happened. A live Approve
+  button on a decided ticket can only ever produce a 409, and if somebody
+  already decided it in the browser, the bot says "Already decided" rather than
+  reporting an error.
+- **Ticket text is escaped before it reaches the chat.** Messages are sent as
+  HTML, and the subject is whatever a member of the public typed. It is the same
+  untrusted text the prompt builder fences, arriving at a different output, and
+  it needs handling at both.
+- **Behind a Compose profile.** Without a token the bot exits at once, and
+  `restart: unless-stopped` would spin it forever. The profile keeps it out of a
+  plain `docker compose up` until somebody has actually configured it.
+
+**Known rough edge:** the allowlist is set in `.env`, so adding a person means
+a restart. That is fine for one team and wrong for many; the next step would be
+a table with an admin route.
 
 ## The n8n workflows
 

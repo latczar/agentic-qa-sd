@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -46,6 +46,19 @@ class Priority(str, enum.Enum):
     CRITICAL = "CRITICAL"
 
 
+class TicketSource(str, enum.Enum):
+    """How the ticket got here.
+
+    Worth storing rather than inferring: once a ticket can arrive from a chat
+    app as well as the web form, "who can I reply to, and where" stops being
+    obvious from the row. It also lets the console show the split, which is
+    the honest way to answer "is anyone actually using the Telegram bot".
+    """
+
+    WEB = "WEB"
+    TELEGRAM = "TELEGRAM"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -53,6 +66,12 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(120))
     email: Mapped[str] = mapped_column(String(255), unique=True)
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole, name="user_role"), default=UserRole.END_USER)
+    # Which Telegram chat belongs to this person, once they have linked one.
+    # Unique so a chat cannot be bound to two accounts, which would make
+    # "who decided this" ambiguous the moment either of them tapped Approve.
+    # Nullable because most users never link one, and BigInteger because
+    # Telegram ids for groups already exceed a 32-bit int.
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -78,6 +97,9 @@ class Ticket(Base):
     description: Mapped[str] = mapped_column(Text)
     status: Mapped[TicketStatus] = mapped_column(
         SAEnum(TicketStatus, name="ticket_status"), default=TicketStatus.NEW
+    )
+    source: Mapped[TicketSource] = mapped_column(
+        SAEnum(TicketSource, name="ticket_source"), default=TicketSource.WEB, server_default="WEB"
     )
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     priority: Mapped[Priority | None] = mapped_column(SAEnum(Priority, name="ticket_priority"), nullable=True)

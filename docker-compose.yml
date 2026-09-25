@@ -105,6 +105,10 @@ services:
       # The worker fires this when the gate routes a ticket to a human - it is
       # the worker, not the API, that makes that decision.
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/ticket-approval}
+      # The worker sends the approval request, so it needs the token as well as
+      # the bot does. The bot only handles what comes back.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,6 +121,31 @@ services:
     volumes:
       - ./worker:/app/worker
       - ./shared:/app/shared
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: telegram_bot/Dockerfile
+    container_name: sd-telegram-bot
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      API_BASE_URL: http://api:8000
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+    volumes:
+      - ./telegram_bot:/app/telegram_bot
+      - ./shared:/app/shared
+    # Without a token the bot exits immediately and restart: unless-stopped
+    # would spin it forever. This profile keeps it out of a plain `up` until
+    # somebody has actually configured it: `docker compose --profile telegram up`.
+    profiles:
+      - telegram
 
   n8n:
     image: n8nio/n8n:latest
