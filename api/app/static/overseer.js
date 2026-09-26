@@ -265,6 +265,7 @@ function redrawLive() {
   drawWorkers();
   drawHeadline();
   drawChips();
+  rideAlong();
   if (teamVisible()) drawTeam();
 }
 
@@ -634,7 +635,11 @@ function drawExits() {
   const tab = $("#drawer-tab");
   tab.classList.toggle("has", n > 0);
   tab.setAttribute("aria-label", `Needs you: ${plural(n, "ticket")} waiting`);
-  if (state.lastWaiting != null && n > state.lastWaiting && !$("#drawer").classList.contains("open")) retrigger(tab, "nudge");
+  if (state.lastWaiting != null && n > state.lastWaiting) {
+    const newest = [...b.waiting].sort((a, z) => new Date(z.waiting_since) - new Date(a.waiting_since))[0];
+    if (newest) petSay(`#${newest.id} needs you.`);
+    if (!$("#drawer").classList.contains("open")) retrigger(tab, "nudge");
+  }
   state.lastWaiting = n;
 }
 
@@ -845,6 +850,13 @@ $("#decide").addEventListener("click", async (ev) => {
     if (act === "instruct") handoff("you", "triage", { tone: "" });
     else ping("you", "ok");
     if (act === "approve" || act === "handled") celebrate(`says thanks: #${id} is sorted.`);
+    petSay({
+      approve: `Nice one. #${id} is sorted.`,
+      handled: `Over to you on #${id}.`,
+      reject: `Passing #${id} to someone else.`,
+      instruct: `Taking notes. #${id} is going round again.`,
+    }[act]);
+    if (act === "instruct") trick("wave", { quiet: true });
   } catch (err) {
     if (err.status === 409) {
       markDecided(id);
@@ -1241,7 +1253,7 @@ function drawPet() {
     if (!$("#pet-float").classList.contains("held")) $(".mouth", el).setAttribute("d", MOUTH[mood]);
     pet.mood = mood;
   }
-  el.title = `${pet.name}'s mood comes from the real system. Click to say hello, drag to move or throw, scroll over ${pet.name} to resize, double-click to bring home.`;
+  el.title = `${pet.name}'s mood comes from the real system. Click to say hello, drag to move or throw, scroll to resize, double-click to bring home, right-click for tricks.`;
   $("#pet-bed").setAttribute("aria-label", `Bring ${pet.name} home`);
   $("#pet-bed").title = `Bring ${pet.name} home`;
   $("#pet-line").textContent = line;
@@ -1266,6 +1278,13 @@ function burst(kind) {
       bit.style.setProperty("--dx", `${Math.cos(angle) * dist}px`);
       bit.style.setProperty("--dy", `${Math.sin(angle) * dist - 12 * k}px`);
       bit.style.setProperty("--rot", `${Math.round(Math.random() * 540 - 270)}deg`);
+    } else if (kind === "note") {
+      bit.className = "fx";
+      bit.textContent = Math.random() < .5 ? "♪" : "♫";
+      bit.style.color = "var(--accent)";
+      bit.style.setProperty("--dx", `${Math.round((Math.random() * 40 - 20) * k)}px`);
+      bit.style.setProperty("--dy", `${-44 * k}px`);
+      bit.style.setProperty("--rot", `${Math.round(Math.random() * 40 - 20)}deg`);
     } else {
       bit.className = "fx";
       bit.textContent = "♥";
@@ -1290,7 +1309,10 @@ function celebrate(line) {
 }
 
 function celebrateIfSolved(e) {
-  if (e.step === "finished" && e.detail?.status === "RESOLVED") celebrate(`is delighted: #${e.ticket_id} was solved on its own!`);
+  if (e.step === "finished" && e.detail?.status === "RESOLVED") {
+    celebrate(`is delighted: #${e.ticket_id} was solved on its own!`);
+    petSay(`Solved #${e.ticket_id} on its own!`);
+  }
 }
 
 $("#pet").addEventListener("click", () => {
@@ -1464,6 +1486,9 @@ petBtn.addEventListener("pointermove", (ev) => {
     if (Math.hypot(ev.clientX - grab.sx, ev.clientY - grab.sy) < 5) return;
     grab.moved = true;
     cancelAnimationFrame(play.raf);
+    closePetMenu(false);
+    play.riding = false;
+    play.rideKey = null;
     liftPet();
     grab.ox = grab.sx - play.x;
     grab.oy = grab.sy - play.y;
@@ -1569,6 +1594,247 @@ function restorePet() {
   }
 }
 
+// --- Pip's tricks, modes, wardrobe and badges -------------------------------
+//
+// A menu of things to do with Pip, from the ⋯ button or a right-click. The
+// modes are driven by the same real events as everything else: riding along
+// means sitting on the station the work is actually at.
+
+const petBubble = $("#pet-bubble"), petMenu = $("#pet-menu"), petMoreBtn = $("#pet-more");
+
+function petSay(text, ms = 2800) {
+  if (!text) return;
+  petBubble.textContent = text;
+  petBubble.hidden = false;
+  clearTimeout(petSay.timer);
+  petSay.timer = setTimeout(() => { petBubble.hidden = true; }, ms);
+}
+
+const TRICKS = { wave: "Wave", spin: "Spin", dance: "Dance", jump: "Jump" };
+const TRICK_LINES = {
+  wave: () => `Hi! I'm ${pet.name}.`,
+  spin: () => "Wheee!",
+  dance: () => "Desk party!",
+  jump: () => "Boing!",
+};
+
+function trick(name, { quiet = false } = {}) {
+  if (!quiet) petSay(TRICK_LINES[name]());
+  if (calm()) return; // the words still come; the moves need Motion on
+  for (const t of Object.keys(TRICKS)) petFloat.classList.remove(`trick-${t}`);
+  retrigger(petFloat, `trick-${name}`);
+  if (name === "dance") for (let i = 0; i < 5; i++) setTimeout(() => burst("note"), i * 330);
+  if (name === "jump") setTimeout(() => retrigger(petFloat, "landed"), 560);
+  clearTimeout(trick.timer);
+  trick.timer = setTimeout(() => petFloat.classList.remove(`trick-${name}`), 2400);
+}
+
+// Wardrobe: every unlocked item is worn unless you took it off.
+function petHidden() {
+  try { return JSON.parse(prefs.get("overseer.petHide") || "[]"); } catch { return []; }
+}
+function applyWardrobe() {
+  const hidden = petHidden();
+  petFloat.dataset.wearing = (petFloat.dataset.unlocked || "").split(" ").filter((k) => k && !hidden.includes(k)).join(" ");
+}
+
+// Today's badges, from the board's real counts. Earning one while you watch is
+// worth a cheer; the ones already earned when the page opens are not.
+const BADGES = [
+  { key: "first", name: "First solve", how: "A ticket solved today", test: (b) => b.solved_today >= 1 },
+  { key: "solo", name: "Five on its own", how: "Five tickets solved today with nobody involved", test: (b) => b.solved_automatically_today >= 5 },
+  { key: "team", name: "Team player", how: "Three tickets solved with your help today", test: (b) => b.solved_today - b.solved_automatically_today >= 3 },
+  { key: "zero", name: "Inbox zero", how: "Nothing waiting for you", test: (b) => b.waiting.length === 0 },
+  { key: "ten", name: "Ten today", how: "Ten tickets solved today", test: (b) => b.solved_today >= 10 },
+];
+function checkBadges() {
+  const b = state.board;
+  if (!b) return;
+  const now = new Set(BADGES.filter((x) => x.test(b)).map((x) => x.key));
+  if (pet.badges) {
+    const fresh = BADGES.find((x) => now.has(x.key) && !pet.badges.has(x.key));
+    if (fresh) { petSay(`Badge: ${fresh.name}!`); burst("confetti"); }
+  }
+  pet.badges = now;
+}
+
+// Ride along: Pip hops onto whichever station a worker is at, and goes back to
+// where it was when the work is done.
+play.ride = prefs.get("overseer.petRide") === "1";
+play.follow = false;
+
+function rideTarget() {
+  const lane = [...state.workers.values()].find((l) => l.step !== "heartbeat");
+  if (!lane) return null;
+  const el = $(`#track [data-stop="${lane.stop}"]`);
+  return el && el.offsetParent !== null ? { key: lane.stop, el } : null;
+}
+
+function seat(el, animate) {
+  const r = el.getBoundingClientRect(), s = petSize();
+  // Perched on the top-right corner: the Working label and the name stay in view.
+  play.x = r.right - s * 0.85;
+  play.y = r.top - s * 0.86;
+  if (animate && !calm()) {
+    petFloat.classList.add("homing");
+    clearTimeout(seat.timer);
+    seat.timer = setTimeout(() => { petFloat.classList.remove("homing"); retrigger(petFloat, "landed"); }, 470);
+  }
+  placePet();
+}
+
+function rideAlong() {
+  if (!play.ride || grab) return;
+  const target = rideTarget();
+  if (!target) {
+    if (!play.riding) return;
+    play.riding = false;
+    play.rideKey = null;
+    if (play.beforeRide) {
+      Object.assign(play, play.beforeRide);
+      if (!calm()) {
+        petFloat.classList.add("homing");
+        setTimeout(() => petFloat.classList.remove("homing"), 470);
+      }
+      placePet();
+    } else {
+      sendPetHome();
+    }
+    return;
+  }
+  if (play.riding && play.rideKey === target.key) return;
+  if (!play.riding) play.beforeRide = play.floating ? { x: play.x, y: play.y } : null;
+  play.riding = true;
+  play.rideKey = target.key;
+  liftPet();
+  seat(target.el, true);
+  if (EXITS.includes(target.key)) petSay({ solved: "Solved!", needs: "This one needs you.", failed: "Couldn't finish this one." }[target.key]);
+}
+addEventListener("scroll", () => {
+  if (!play.riding) return;
+  const target = rideTarget();
+  if (target) seat(target.el, false);
+}, { passive: true });
+
+// Follow me: Pip trails the pointer, a little below and to the right of it so
+// it never sits under the pointer and swallows a click. Esc stops it.
+const follow = { tx: 0, ty: 0, raf: 0 };
+document.addEventListener("pointermove", (ev) => {
+  if (!play.follow || grab) return;
+  follow.tx = ev.clientX + 16;
+  follow.ty = ev.clientY + 16;
+  if (!follow.raf) follow.raf = requestAnimationFrame(followStep);
+});
+function followStep() {
+  follow.raf = 0;
+  if (!play.follow || grab) return;
+  liftPet();
+  play.x += (follow.tx - play.x) * 0.14;
+  play.y += (follow.ty - play.y) * 0.14;
+  placePet();
+  if (Math.hypot(follow.tx - play.x, follow.ty - play.y) > 0.5) follow.raf = requestAnimationFrame(followStep);
+}
+function setFollow(on) {
+  play.follow = on && !calm();
+  if (play.follow) { setRide(false); petSay("Following you. Press Esc to stop."); }
+  else savePetSpot();
+}
+function setRide(on) {
+  play.ride = on;
+  prefs.set("overseer.petRide", on ? "1" : "0");
+  if (on) { if (play.follow) play.follow = false; petSay("I'll ride along with the work."); rideAlong(); }
+  else if (play.riding) { play.riding = false; play.rideKey = null; }
+}
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape" && play.follow) { setFollow(false); petSay("Staying here."); }
+});
+
+// The menu.
+function menuHtml() {
+  const level = pet.level ?? 1;
+  const hidden = petHidden();
+  const b = state.board;
+  const got = b ? BADGES.filter((x) => x.test(b)) : [];
+  const trickButtons = Object.entries(TRICKS)
+    .map(([k, label]) => `<button role="menuitem" class="pm-trick" data-trick="${k}">${label}</button>`).join("");
+  const wardrobe = UNLOCKS.map((u) => level >= u.level
+    ? `<button role="menuitemcheckbox" aria-checked="${!hidden.includes(u.key)}" data-wear="${u.key}"><span class="pm-check"></span><span><b>${u.label}</b></span></button>`
+    : `<div class="pm-locked">${u.label} <small>at level ${u.level}</small></div>`).join("");
+  return `
+    <div class="pm-sec">Tricks</div>
+    <div class="pm-row">${trickButtons}</div>
+    <div class="pm-sec">Modes</div>
+    <button role="menuitemcheckbox" aria-checked="${play.ride}" data-mode="ride"><span class="pm-check"></span><span><b>Ride along</b><small>Hops onto the station the work is at</small></span></button>
+    <button role="menuitemcheckbox" aria-checked="${play.follow}" data-mode="follow" ${calm() ? "disabled" : ""}><span class="pm-check"></span><span><b>Follow me</b><small>${calm() ? "Needs Motion switched on" : "Trails your pointer. Esc stops it"}</small></span></button>
+    <div class="pm-sec">Wardrobe</div>
+    ${wardrobe}
+    <div class="pm-sec">Today's badges · ${got.length} of ${BADGES.length}</div>
+    <div class="pm-badges">${BADGES.map((x) => `<span class="badge ${got.includes(x) ? "got" : ""}" title="${esc(x.how)}">${esc(x.name)}</span>`).join("")}</div>
+    <button role="menuitem" class="pm-home" data-home ${play.floating ? "" : "disabled"}>Bring ${esc(pet.name)} home</button>`;
+}
+
+function openPetMenu(at) {
+  petMenu.innerHTML = menuHtml();
+  petMenu.hidden = false;
+  petMoreBtn.setAttribute("aria-expanded", "true");
+  const r = at || petFloat.getBoundingClientRect();
+  const m = petMenu.getBoundingClientRect();
+  let x = r.right + 8, y = r.top;
+  if (x + m.width > innerWidth - 8) x = Math.max(8, r.left - m.width - 8);
+  if (y + m.height > innerHeight - 8) y = Math.max(8, innerHeight - m.height - 8);
+  petMenu.style.left = `${x}px`;
+  petMenu.style.top = `${y}px`;
+  $("button:not(:disabled)", petMenu)?.focus({ preventScroll: true });
+}
+function closePetMenu(refocus = true) {
+  if (petMenu.hidden) return;
+  petMenu.hidden = true;
+  petMoreBtn.setAttribute("aria-expanded", "false");
+  if (refocus) petBtn.focus({ preventScroll: true });
+}
+
+petMoreBtn.addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  if (petMenu.hidden) openPetMenu(); else closePetMenu();
+});
+petMoreBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+petBtn.addEventListener("contextmenu", (ev) => {
+  ev.preventDefault();
+  openPetMenu({ left: ev.clientX, right: ev.clientX, top: ev.clientY });
+});
+petBtn.addEventListener("keydown", (ev) => {
+  if (ev.key === "m" || ev.key === "M") { ev.preventDefault(); openPetMenu(); }
+});
+document.addEventListener("pointerdown", (ev) => {
+  if (!petMenu.hidden && !petMenu.contains(ev.target) && ev.target !== petMoreBtn) closePetMenu(false);
+});
+petMenu.addEventListener("keydown", (ev) => {
+  const items = $$("button:not(:disabled)", petMenu);
+  const i = items.indexOf(document.activeElement);
+  if (ev.key === "Escape") { ev.preventDefault(); closePetMenu(); }
+  else if (ev.key === "ArrowDown" || ev.key === "ArrowRight") { ev.preventDefault(); items[(i + 1) % items.length]?.focus(); }
+  else if (ev.key === "ArrowUp" || ev.key === "ArrowLeft") { ev.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+});
+petMenu.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button");
+  if (!btn || btn.disabled) return;
+  if (btn.dataset.trick) { closePetMenu(); trick(btn.dataset.trick); return; }
+  if (btn.dataset.home !== undefined) { closePetMenu(); setRide(false); setFollow(false); sendPetHome(); return; }
+  if (btn.dataset.mode === "ride") setRide(!play.ride);
+  if (btn.dataset.mode === "follow") { setFollow(!play.follow); if (play.follow) { closePetMenu(false); return; } }
+  if (btn.dataset.wear) {
+    const hidden = new Set(petHidden());
+    if (hidden.has(btn.dataset.wear)) hidden.delete(btn.dataset.wear); else hidden.add(btn.dataset.wear);
+    prefs.set("overseer.petHide", JSON.stringify([...hidden]));
+    applyWardrobe();
+    petSay(hidden.has(btn.dataset.wear) ? "Taking that off." : "Looking sharp.");
+  }
+  // Checkboxes stay open so you can flip several; redraw keeps focus in place.
+  const focusKey = btn.dataset.mode || btn.dataset.wear;
+  petMenu.innerHTML = menuHtml();
+  $(`[data-mode="${focusKey}"], [data-wear="${focusKey}"]`, petMenu)?.focus({ preventScroll: true });
+});
+
 // --- Pip's level -------------------------------------------------------------------
 //
 // XP comes from every ticket the desk has ever solved, read from the database,
@@ -1577,9 +1843,9 @@ function restorePet() {
 
 const XP_ON_ITS_OWN = 10, XP_WITH_HELP = 5;
 const UNLOCKS = [
-  { level: 2, key: "headset", name: "a headset" },
-  { level: 4, key: "bow", name: "a bow tie" },
-  { level: 6, key: "crown", name: "a crown" },
+  { level: 2, key: "headset", name: "a headset", label: "Headset" },
+  { level: 4, key: "bow", name: "a bow tie", label: "Bow tie" },
+  { level: 6, key: "crown", name: "a crown", label: "Crown" },
 ];
 const xpToReach = (n) => 25 * n * (n - 1); // level 2 at 50 XP, 3 at 150, 4 at 300...
 const levelAt = (xp) => Math.floor((1 + Math.sqrt(1 + (4 * xp) / 25)) / 2);
@@ -1592,6 +1858,8 @@ function drawLevel() {
   const from = xpToReach(level), to = xpToReach(level + 1);
   const next = UNLOCKS.find((u) => u.level > level);
   petFloat.dataset.unlocked = UNLOCKS.filter((u) => level >= u.level).map((u) => u.key).join(" ");
+  applyWardrobe();
+  checkBadges();
   const badge = $("#pet-level");
   badge.hidden = false;
   badge.textContent = `Lv ${level}`;
@@ -1601,6 +1869,7 @@ function drawLevel() {
   if (pet.level != null && level > pet.level) {
     const got = UNLOCKS.find((u) => u.level === level);
     celebrate(`reached level ${level}${got ? ` and got ${got.name}` : ""}!`);
+    petSay(`Level ${level}!${got ? ` I got ${got.name}.` : ""}`);
   }
   pet.level = level;
 }
