@@ -264,6 +264,7 @@ function redrawLive() {
   layoutTokens();
   drawWorkers();
   drawHeadline();
+  drawChips();
   if (teamVisible()) drawTeam();
 }
 
@@ -381,11 +382,11 @@ function layoutWires() {
   // The inlet: where new tickets come in from, the web form or Telegram.
   const q = box(track, "queue");
   const inlet = q.l > 14
-    ? { d: `M6,${q.cy} L${q.l - 3},${q.cy}`, x: 6, y: q.cy }
-    : { d: `M${q.cx},6 L${q.cx},${q.t - 3}`, x: q.cx, y: 6 };
+    ? { d: `M19,${q.cy} L${q.l - 3},${q.cy}`, x: 19, y: q.cy }
+    : { d: `M${q.cx},17 L${q.cx},${q.t - 3}`, x: q.cx, y: 17 };
   Object.assign($("#slot").style, q.l > 14
-    ? { left: "-4px", top: `${q.cy - 34}px`, width: "22px", height: "68px" }
-    : { left: `${q.cx - 40}px`, top: "-2px", width: "80px", height: "18px" });
+    ? { left: "8px", top: `${q.cy - 34}px`, width: "22px", height: "68px" }
+    : { left: `${q.cx - 40}px`, top: "8px", width: "80px", height: "18px" });
   const svg = $("#wires");
   svg.setAttribute("viewBox", `0 0 ${t.width} ${t.height}`);
   svg.innerHTML =
@@ -401,7 +402,11 @@ function markWires() {
   const live = new Set(busyLanes().filter((l) => l.prevStop).map((l) => `${l.prevStop}>${l.stop}`));
   for (const p of $$("#wires path[data-from]")) p.classList.toggle("live", live.has(`${p.dataset.from}>${p.dataset.to}`));
   const here = new Set(busyLanes().map((l) => l.stop));
-  for (const s of $$("#track .stop")) s.classList.toggle("here", here.has(s.dataset.stop) && !EXITS.includes(s.dataset.stop));
+  const settled = new Set([...state.workers.values()].filter((l) => l.linger).map((l) => l.stop));
+  for (const s of $$("#track .stop")) {
+    const exit = EXITS.includes(s.dataset.stop);
+    s.classList.toggle("here", exit ? settled.has(s.dataset.stop) : here.has(s.dataset.stop));
+  }
 }
 
 // Tokens are created once per worker and moved, never rebuilt. Rebuilding
@@ -509,20 +514,45 @@ function drawHeadline() {
   drawPet();
 }
 
+// The desk today: four tiles. Everything on them is counted by the broker or
+// the database; nothing is estimated.
 function drawChips() {
   const q = Object.fromEntries((state.queues || []).map((x) => [x.name, x]));
   const b = state.board;
-  const chips = [];
-  if (state.brokerWorkers != null) {
-    chips.push(`<span class="chip ${state.brokerWorkers ? "" : "bad"}"><b>${state.brokerWorkers}</b> ${engineer() ? `consumer${state.brokerWorkers === 1 ? "" : "s"} on ticket.processing` : `worker${state.brokerWorkers === 1 ? "" : "s"} ready`}</span>`);
-  }
-  if (q["ticket.processing"]) chips.push(`<span class="chip"><b>${q["ticket.processing"].messages}</b> in line</span>`);
-  if (q["ticket.retry"]?.messages) chips.push(`<span class="chip warn"><b>${q["ticket.retry"].messages}</b> trying again</span>`);
+  const eng = engineer();
+  const tiles = [];
+
   if (b) {
-    chips.push(`<button type="button" class="chip ${b.waiting.length ? "warn" : ""}" data-open-drawer title="Open Needs you"><b>${b.waiting.length}</b> need${b.waiting.length === 1 ? "s" : ""} you</button>`);
-    chips.push(`<span class="chip"><b>${b.solved_today}</b> solved today${b.solved_today ? ` (${b.solved_automatically_today} on its own)` : ""}</span>`);
+    const own = b.solved_automatically_today, help = b.solved_today - b.solved_automatically_today;
+    const total = b.solved_today || 1;
+    tiles.push(`<div class="stat ${b.solved_today ? "good" : ""}">
+      <span class="k">Solved today</span><b>${b.solved_today}</b>
+      <span class="split" aria-hidden="true"><i class="own" style="width:${(own / total) * 100}%"></i><i class="help" style="width:${(help / total) * 100}%"></i></span>
+      <span class="sub">${b.solved_today
+        ? `<span><i class="dot own"></i>${own} on its own</span><span><i class="dot help"></i>${help} with your help</span>`
+        : "Nothing yet today"}</span></div>`);
+
+    const n = b.waiting.length;
+    tiles.push(`<button type="button" class="stat ${n ? "warn" : ""}" data-open-drawer title="Open Needs you">
+      <span class="k">Needs you</span><b>${n}</b>
+      <span class="sub">${n ? `Oldest waiting ${esc(waited(b.waiting[0].waiting_since))}` : "All clear"}</span></button>`);
   }
-  $("#chips").innerHTML = chips.join("");
+
+  if (state.brokerWorkers != null) {
+    const w = state.brokerWorkers, busy = busyLanes().length;
+    tiles.push(`<div class="stat ${w ? "" : "bad"}">
+      <span class="k">Workers</span><b>${w}</b>
+      <span class="sub">${eng ? `consumer${w === 1 ? "" : "s"} on ticket.processing` : w === 0 ? "None running" : busy ? `${busy} busy right now` : "Ready for work"}</span></div>`);
+  }
+
+  if (q["ticket.processing"]) {
+    const retrying = q["ticket.retry"]?.messages || 0;
+    tiles.push(`<div class="stat ${retrying ? "warn" : ""}">
+      <span class="k">In line</span><b>${q["ticket.processing"].messages}</b>
+      <span class="sub">${retrying ? `${retrying} trying again` : eng ? "ticket.processing" : "Waiting for a worker"}</span></div>`);
+  }
+
+  $("#chips").innerHTML = tiles.join("");
 }
 
 function drawQueues() {
@@ -1218,10 +1248,6 @@ function drawPet() {
   const name = $("#pet-name");
   if (name && name.textContent !== pet.name) name.textContent = pet.name;
   lookAtWork(mood);
-  const b = state.board;
-  if (b) {
-    $("#pet-tally").innerHTML = `Today: <b>${b.solved_automatically_today}</b> solved on its own, <b>${b.solved_today - b.solved_automatically_today}</b> with your help`;
-  }
 }
 
 function burst(kind) {
