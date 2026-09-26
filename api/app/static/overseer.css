@@ -800,6 +800,14 @@ body.drawer-open .drawer-tab { display: none; }
   .drawer-tab { right: 12px; bottom: 12px; }
 }
 
+/* Pip tucked away: a small, still face beside the status line, so the mood
+   colour is still there at a glance, and nothing else. */
+body.pip-off .pet-wrap { --pet-size: 30px !important; }
+body.pip-off .pet-level, body.pip-off .pet-grip, body.pip-off .pet-more, body.pip-off .pet-bubble,
+body.pip-off .pet-bed, body.pip-off .pet-xp, body.pip-off .fx, body.pip-off .pet .zzz { display: none !important; }
+body.pip-off .pet *, body.pip-off .pet-float svg { animation: none !important; }
+body.pip-off .pet { cursor: pointer; }
+
 /* A still page when motion is off: no pulses, no bouncing, no breathing. The
    script sets .calm from the Motion switch, which starts out following the
    system's reduce-motion setting. The information is all in the text. */
