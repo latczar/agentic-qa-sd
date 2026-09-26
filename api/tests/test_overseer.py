@@ -49,6 +49,13 @@ def test_the_page_and_its_assets_are_served(client):
     assert client.get("/static/overseer.css").status_code == 200
 
 
+def test_the_pages_and_their_assets_are_revalidated_not_served_stale(client):
+    """No build step fingerprints the file names, so every load must check
+    for a newer copy, or a browser shows an old script with a new page."""
+    for path in ("/", "/overseer", "/static/overseer.js", "/static/overseer.css"):
+        assert client.get(path).headers.get("cache-control") == "no-cache", path
+
+
 def test_recent_returns_the_newest_rows_with_their_subject(client, db_session):
     user = User(name="Test User", email="overseer-recent@example.com", role=UserRole.AGENT)
     db_session.add(user)

@@ -14,7 +14,21 @@ STATIC_DIR = Path(__file__).parent / "static"
 # The overseer's script and styles live in their own files rather than inline,
 # because that page is large enough that one file would be hard to read. Still
 # no build step: these are served exactly as written.
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# The pages change with the code and there is no build step to fingerprint
+# file names, so a browser left to its own heuristics served yesterday's script
+# with today's page. no-cache still lets it keep a copy; it only has to check
+# the ETag first, so a plain reload shows a change.
+REVALIDATE = {"Cache-Control": "no-cache"}
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers.update(REVALIDATE)
+        return response
+
+
+app.mount("/static", RevalidatedStaticFiles(directory=STATIC_DIR), name="static")
 
 app.include_router(tickets.router)
 app.include_router(approvals.router)
@@ -29,7 +43,7 @@ app.include_router(team.router)
 def index() -> FileResponse:
     """The demo UI. Plain HTML and fetch calls against the same endpoints
     below - no build step, no separate frontend service to keep running."""
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers=REVALIDATE)
 
 
 @app.get("/health")
