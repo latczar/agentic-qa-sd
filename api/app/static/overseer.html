@@ -67,6 +67,8 @@
       </button>
       <span class="pet-level" id="pet-level" hidden>Lv 1</span>
       <span class="pet-grip" id="pet-grip" title="Drag to make Pip bigger or smaller" aria-hidden="true"></span>
+      <button class="pet-more" id="pet-more" type="button" aria-label="Things to do with Pip" aria-haspopup="menu" aria-expanded="false" title="Tricks, modes, wardrobe and badges">⋯</button>
+      <span class="pet-bubble" id="pet-bubble" role="status" hidden></span>
       </div>
     </div>
     <div class="say-wrap">
@@ -204,6 +206,8 @@
 <button class="drawer-tab" id="drawer-tab" type="button" aria-controls="drawer" aria-expanded="false">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></svg><span>Needs you</span><span class="count zero" id="tab-count">0</span>
 </button>
+
+<div class="pet-menu" id="pet-menu" role="menu" aria-label="Things to do with Pip" hidden></div>
 
 <!-- Write your own ticket. It goes in through POST /tickets like any other. -->
 <dialog class="sheet" id="new-ticket" aria-labelledby="nt-title">
