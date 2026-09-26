@@ -148,7 +148,7 @@ def pump(stop: threading.Event, push) -> None:
 
 @router.get("", include_in_schema=False)
 def overseer_page() -> FileResponse:
-    return FileResponse(STATIC_DIR / "overseer.html")
+    return FileResponse(STATIC_DIR / "overseer.html", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/stream")
