@@ -246,7 +246,8 @@ you watch.
 - Approve only stands out when the AI is at least 70% sure *and* cites a help
   article.
 - Pip, the desk pet, takes its mood from real signals and says why. It levels
-  up from the desk's all-time solved tickets, read from the database.
+  up from the desk's all-time solved tickets, read from the database, and the
+  Pip switch tucks it away into a small still face.
 - Tickets go in from the tray (drag or click), **+ New ticket** (`N`), the
   console or Telegram. **Engineer view** shows queue names, raw reasons, broker
   depths and the audit log.

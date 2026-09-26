@@ -1253,7 +1253,9 @@ function drawPet() {
     if (!$("#pet-float").classList.contains("held")) $(".mouth", el).setAttribute("d", MOUTH[mood]);
     pet.mood = mood;
   }
-  el.title = `${pet.name}'s mood comes from the real system. Click to say hello, drag to move or throw, scroll to resize, double-click to bring home, right-click for tricks.`;
+  el.title = document.body.classList.contains("pip-off")
+    ? `${pet.name} is tucked away. The colour still shows the mood. Click to bring ${pet.name} back.`
+    : `${pet.name}'s mood comes from the real system. Click to say hello, drag to move or throw, scroll to resize, double-click to bring home, right-click for tricks.`;
   $("#pet-bed").setAttribute("aria-label", `Bring ${pet.name} home`);
   $("#pet-bed").title = `Bring ${pet.name} home`;
   $("#pet-line").textContent = line;
@@ -1263,7 +1265,7 @@ function drawPet() {
 }
 
 function burst(kind) {
-  if (calm()) return;
+  if (calm() || !pipOn()) return;
   const wrap = $("#pet-float");
   const size = petSize(), k = size / 76;
   const colours = ["var(--ok)", "var(--accent)", "var(--warn)", "#ff8fa3", "var(--info)"];
@@ -1316,6 +1318,7 @@ function celebrateIfSolved(e) {
 }
 
 $("#pet").addEventListener("click", () => {
+  if (!pipOn()) { applyPip(true, { remember: true }); petSay(`${pet.name} is back.`); return; }
   if (play.suppressClick) return; // that was the end of a drag, not a click
   burst("heart");
   retrigger($("#pet"), "hello");
@@ -1475,7 +1478,7 @@ function flingPet(vx, vy) {
 
 let grab = null;
 petBtn.addEventListener("pointerdown", (ev) => {
-  if (ev.button !== 0) return;
+  if (ev.button !== 0 || !pipOn()) return;
   grab = { id: ev.pointerId, sx: ev.clientX, sy: ev.clientY, moved: false, trail: [] };
   petBtn.setPointerCapture(ev.pointerId);
 });
@@ -1533,7 +1536,7 @@ petFloat.addEventListener("pointerleave", () => { play.hoverSince = 0; });
 // Also when Pip was dropped right under a pointer that never left.
 petFloat.addEventListener("pointermove", () => { if (!play.hoverSince) play.hoverSince = performance.now(); });
 petFloat.addEventListener("wheel", (ev) => {
-  if (!play.hoverSince || performance.now() - play.hoverSince < 350) return;
+  if (!pipOn() || !play.hoverSince || performance.now() - play.hoverSince < 350) return;
   ev.preventDefault();
   resizePet(petSize() * (ev.deltaY < 0 ? 1.08 : 1 / 1.08));
 }, { passive: false });
@@ -1558,6 +1561,7 @@ $("#pet-grip").addEventListener("pointerdown", (ev) => {
 
 // The same, from the keyboard: arrows move, + and - resize, Home sends Pip home.
 petBtn.addEventListener("keydown", (ev) => {
+  if (!pipOn()) return;
   const step = ev.shiftKey ? 80 : 24;
   const move = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[ev.key];
   if (move) {
@@ -1581,8 +1585,7 @@ petBtn.addEventListener("keydown", (ev) => {
 
 addEventListener("resize", () => { if (play.floating) placePet(); });
 
-function restorePet() {
-  if (play.size) petHome.style.setProperty("--pet-size", `${play.size}px`);
+function liftToSavedSpot() {
   let spot = null;
   try { spot = JSON.parse(prefs.get("overseer.petSpot") || "null"); } catch {}
   if (spot && Number.isFinite(spot.fx) && Number.isFinite(spot.fy)) {
@@ -1594,6 +1597,45 @@ function restorePet() {
   }
 }
 
+function restorePet() {
+  if (play.size) petHome.style.setProperty("--pet-size", `${play.size}px`);
+  if (prefs.get("overseer.pip") !== "off") liftToSavedSpot();
+}
+
+// --- Pip on or off -----------------------------------------------------------
+//
+// Off tucks Pip into a small still face beside the status line: the mood colour
+// stays, and the words, moves, bubbles and modes all stop. Where Pip was left
+// on screen is kept, so switching back puts Pip where you had it.
+
+const pipBox = $("#pip-switch");
+const pipOn = () => !document.body.classList.contains("pip-off");
+
+function applyPip(on, { remember = false } = {}) {
+  if (remember) prefs.set("overseer.pip", on ? "on" : "off");
+  pipBox.checked = on;
+  if (on === pipOn()) return;
+  document.body.classList.toggle("pip-off", !on);
+  if (!on) {
+    closePetMenu(false);
+    petBubble.hidden = true;
+    play.follow = false;
+    play.riding = false;
+    play.rideKey = null;
+    if (play.floating) {
+      const spot = prefs.get("overseer.petSpot");
+      cancelAnimationFrame(play.raf);
+      dockPet();
+      if (spot) prefs.set("overseer.petSpot", spot);
+    }
+  } else {
+    if (!play.floating) liftToSavedSpot();
+    if (play.ride) rideAlong();
+  }
+  drawPet();
+}
+pipBox.addEventListener("change", () => applyPip(pipBox.checked, { remember: true }));
+
 // --- Pip's tricks, modes, wardrobe and badges -------------------------------
 //
 // A menu of things to do with Pip, from the ⋯ button or a right-click. The
@@ -1603,7 +1645,7 @@ function restorePet() {
 const petBubble = $("#pet-bubble"), petMenu = $("#pet-menu"), petMoreBtn = $("#pet-more");
 
 function petSay(text, ms = 2800) {
-  if (!text) return;
+  if (!text || !pipOn()) return;
   petBubble.textContent = text;
   petBubble.hidden = false;
   clearTimeout(petSay.timer);
@@ -1619,6 +1661,7 @@ const TRICK_LINES = {
 };
 
 function trick(name, { quiet = false } = {}) {
+  if (!pipOn()) return;
   if (!quiet) petSay(TRICK_LINES[name]());
   if (calm()) return; // the words still come; the moves need Motion on
   for (const t of Object.keys(TRICKS)) petFloat.classList.remove(`trick-${t}`);
@@ -1684,7 +1727,7 @@ function seat(el, animate) {
 }
 
 function rideAlong() {
-  if (!play.ride || grab) return;
+  if (!play.ride || grab || !pipOn()) return;
   const target = rideTarget();
   if (!target) {
     if (!play.riding) return;
@@ -1799,11 +1842,12 @@ petMoreBtn.addEventListener("click", (ev) => {
 });
 petMoreBtn.addEventListener("pointerdown", (ev) => ev.stopPropagation());
 petBtn.addEventListener("contextmenu", (ev) => {
+  if (!pipOn()) return;
   ev.preventDefault();
   openPetMenu({ left: ev.clientX, right: ev.clientX, top: ev.clientY });
 });
 petBtn.addEventListener("keydown", (ev) => {
-  if (ev.key === "m" || ev.key === "M") { ev.preventDefault(); openPetMenu(); }
+  if (pipOn() && (ev.key === "m" || ev.key === "M")) { ev.preventDefault(); openPetMenu(); }
 });
 document.addEventListener("pointerdown", (ev) => {
   if (!petMenu.hidden && !petMenu.contains(ev.target) && ev.target !== petMoreBtn) closePetMenu(false);
@@ -2219,6 +2263,7 @@ applyMotion();
 applyTheme();
 applyEngineer();
 restorePet();
+applyPip(prefs.get("overseer.pip") !== "off");
 drawFeed();
 loadPeople();
 connect();
