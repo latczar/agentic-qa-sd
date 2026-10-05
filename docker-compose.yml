@@ -61,7 +61,7 @@ services:
       # The overseer's team view asks n8n whether it is up (/healthz only).
       N8N_URL: ${N8N_URL:-http://n8n:5678}
     ports:
-      - "8000:8000"
+      - "${API_HOST_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy

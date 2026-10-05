@@ -367,7 +367,8 @@ which is the safe direction, but it fires more often than it should.
 
 Postgres is published on host port **5433**, not 5432, so this project can run at the
 same time as another local Postgres. Inside the Compose network it's still 5432.
-Override with `POSTGRES_HOST_PORT` in `.env` if 5433 is taken too.
+Override with `POSTGRES_HOST_PORT` in `.env` if 5433 is taken too. The API works
+the same way: set `API_HOST_PORT=8001` if another project already has 8000.
 
 Ingestion needs Ollama running on the host with the embedding model pulled:
 
